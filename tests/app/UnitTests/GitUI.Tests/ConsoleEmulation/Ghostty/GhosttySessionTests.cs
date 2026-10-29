@@ -115,7 +115,7 @@ public sealed class GhosttySessionTests
         GhosttyPtyOptions options = new()
         {
             App = comSpec,
-            CommandLine = [comSpec, "/c", "echo", "hi"],
+            CommandLine = ["/c", "echo hi"],
             Cwd = AppContext.BaseDirectory,
             Cols = 80,
             Rows = 24
