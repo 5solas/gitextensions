@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Drawing;
 using System.Text;
 using LibGhostty;
@@ -111,6 +111,22 @@ internal sealed partial class GhosttyTerminalControl
 
                 Color foregroundColor = hasForeground ? ToColor(nativeForeground) : defaultForeground;
                 Color backgroundColor = hasBackground ? ToColor(nativeBackground) : defaultBackground;
+
+                if (_selection.Contains(col, row))
+                {
+                    Color selectionBackground = _currentScheme?.SelectionBackground ?? Color.Empty;
+                    Color selectionForeground = _currentScheme?.SelectionForeground ?? Color.Empty;
+
+                    if (selectionBackground.IsEmpty || selectionForeground.IsEmpty)
+                    {
+                        (foregroundColor, backgroundColor) = (backgroundColor, foregroundColor);
+                    }
+                    else
+                    {
+                        foregroundColor = selectionForeground;
+                        backgroundColor = selectionBackground;
+                    }
+                }
 
                 int wide = 0;
                 if (library.RowCellsGetRaw(rowCellsHandle, out ulong rawCell) == Success)

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Drawing;
 using System.IO;
@@ -162,6 +162,8 @@ internal sealed partial class GhosttyTerminalControl : Control
     /// </summary>
     public void Stop()
     {
+        ClearSelection();
+
         IGhosttyPtyConnection? connection = _connection;
         if (connection is null)
         {
@@ -255,30 +257,10 @@ internal sealed partial class GhosttyTerminalControl : Control
         Invalidate();
     }
 
-    protected override bool IsInputKey(Keys keyData) => true;
-
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
         EnsureNativeHandlesCreated();
-    }
-
-    protected override void OnGotFocus(EventArgs e)
-    {
-        base.OnGotFocus(e);
-        Invalidate();
-    }
-
-    protected override void OnLostFocus(EventArgs e)
-    {
-        base.OnLostFocus(e);
-        Invalidate();
-    }
-
-    protected override void OnMouseDown(MouseEventArgs e)
-    {
-        base.OnMouseDown(e);
-        Focus();
     }
 
     protected override void OnResize(EventArgs e)
@@ -294,6 +276,8 @@ internal sealed partial class GhosttyTerminalControl : Control
             _disposed = true;
 
             Stop();
+
+            DisposeInputResources();
 
             if (_rowCells != IntPtr.Zero || _rowIterator != IntPtr.Zero || _renderState != IntPtr.Zero || _terminal != IntPtr.Zero)
             {
@@ -396,6 +380,8 @@ internal sealed partial class GhosttyTerminalControl : Control
         {
             ApplyColorSchemeCore(_currentScheme);
         }
+
+        EnsureInputHandlesCreated();
     }
 
     private void UpdateCellMetrics()
