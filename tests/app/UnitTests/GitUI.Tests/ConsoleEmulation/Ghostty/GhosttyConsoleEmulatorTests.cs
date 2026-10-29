@@ -1,6 +1,5 @@
 ﻿using GitUI.ConsoleEmulation;
 using GitUI.ConsoleEmulation.Ghostty;
-using GitUI.ConsoleEmulation.PlainText;
 using GitUI.Shells;
 using NSubstitute;
 
@@ -74,13 +73,13 @@ public sealed class GhosttyConsoleEmulatorTests
     }
 
     [Test]
-    public void CreateCommandRunner_should_return_PlainTextConsoleCommandRunner()
+    public void CreateCommandRunner_should_return_GhosttyCommandRunner()
     {
         IShellProvider shellProvider = Substitute.For<IShellProvider>();
         GhosttyConsoleEmulator emulator = new(shellProvider);
 
         IConsoleCommandRunner runner = emulator.CreateCommandRunner(new ConsoleEmulatorSettings(null, null));
 
-        runner.Should().BeOfType<PlainTextConsoleCommandRunner>();
+        runner.Should().BeOfType<GhosttyCommandRunner>();
     }
 }

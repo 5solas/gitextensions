@@ -571,6 +571,30 @@ internal sealed partial class GhosttyTerminalControl : Control
         }
     }
 
+    internal void WriteToTerminalForDisplay(byte[] data)
+    {
+        if (data.Length == 0)
+        {
+            return;
+        }
+
+        EnsureNativeHandlesCreated();
+        WriteToTerminal(data);
+        UpdateScrollbar();
+        Invalidate();
+    }
+
+    internal void ResetScreen()
+    {
+        if (_terminal != IntPtr.Zero && GhosttySession.IsSupported)
+        {
+            GhosttySession.Extras.TerminalReset(_terminal);
+            ClearSelection();
+            UpdateScrollbar();
+            Invalidate();
+        }
+    }
+
     private void WriteToTerminal(byte[] data)
     {
         if (_terminal == IntPtr.Zero || data.Length == 0)
