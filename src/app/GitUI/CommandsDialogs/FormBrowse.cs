@@ -3090,6 +3090,8 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         public FilterToolBar ToolStripFilters => _form.ToolStripFilters;
         public CommitInfo.CommitInfo RevisionInfo => _form.RevisionInfo;
         public TabPage CommitInfoTabPage => _form.CommitInfoTabPage;
+        public IConsoleShellRunner? Terminal => _form._terminal;
+        public TabPage? ConsoleTabPage => _form._consoleTabPage;
 
         public void RefreshRevisions() => _form.RefreshRevisions();
         public void SetWorkingDir(string? path) => _form.SetWorkingDir(path);
