@@ -23,6 +23,8 @@ internal sealed partial class GhosttyTerminalControl
     private bool _isDraggingSelection;
     private bool _outputReceivedSubscribed;
 
+    internal event EventHandler? KeyPressedAfterExit;
+
     /// <summary>
     ///  Pastes text from the system clipboard into the terminal, encoding with bracketed paste mode if enabled.
     /// </summary>
@@ -164,6 +166,14 @@ internal sealed partial class GhosttyTerminalControl
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+
+        if (!IsProcessRunning && e.KeyCode is Keys.Escape or Keys.Enter)
+        {
+            KeyPressedAfterExit?.Invoke(this, EventArgs.Empty);
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            return;
+        }
 
         Keys modifiers = e.Modifiers;
         Keys keyCode = e.KeyCode;
