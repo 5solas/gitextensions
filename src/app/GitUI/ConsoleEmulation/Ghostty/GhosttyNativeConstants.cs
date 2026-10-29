@@ -1,4 +1,4 @@
-namespace GitUI.ConsoleEmulation.Ghostty;
+﻿namespace GitUI.ConsoleEmulation.Ghostty;
 
 /// <summary>
 ///  Native constants and option codes not exposed by LibGhostty.Net 1.0.2.
