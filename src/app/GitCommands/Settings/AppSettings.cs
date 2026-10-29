@@ -482,7 +482,7 @@ public static partial class AppSettings
 
     public static BooleanSetting ShowConEmuTab { get; } = new(DetailedSettingsPath, nameof(ShowConEmuTab), defaultValue: true);
 
-    public static TextSetting ConsoleEmulatorName { get; } = new(DetailedSettingsPath, nameof(ConsoleEmulatorName), "ConEmu");
+    public static TextSetting ConsoleEmulatorName { get; } = new(DetailedSettingsPath, nameof(ConsoleEmulatorName), "ghostty");
 
     public static TextSetting ConEmuStyle { get; } = new(DetailedSettingsPath, nameof(ConEmuStyle), "Default");
 
