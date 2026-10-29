@@ -1,5 +1,4 @@
 ﻿using System.Drawing;
-using GitUI.ConsoleEmulation.PlainText;
 using GitUI.Shells;
 
 namespace GitUI.ConsoleEmulation.Ghostty;
@@ -29,7 +28,9 @@ internal sealed class GhosttyConsoleEmulator(IShellProvider shellProvider) : ICo
     /// <inheritdoc/>
     public IConsoleCommandRunner CreateCommandRunner(ConsoleEmulatorSettings settings)
     {
-        return new PlainTextConsoleCommandRunner();
+        GhosttyColorScheme scheme = ResolveScheme(settings.Theme);
+        Font font = settings.Font ?? DefaultFont;
+        return new GhosttyCommandRunner(scheme, font);
     }
 
     /// <inheritdoc/>
