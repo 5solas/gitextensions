@@ -1,5 +1,3 @@
-using System;
-using AwesomeAssertions;
 using GitUI.ConsoleEmulation.Ghostty;
 
 namespace GitUITests.ConsoleEmulation.Ghostty;

@@ -1,4 +1,4 @@
-namespace GitUI.ConsoleEmulation.Ghostty;
+﻿namespace GitUI.ConsoleEmulation.Ghostty;
 
 /// <summary>
 ///  Values of the libghostty-vt <c>GhosttyKey</c> enum (physical key codes).

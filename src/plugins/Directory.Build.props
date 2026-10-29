@@ -31,4 +31,10 @@
     <ProjectReference Include="$(RepoRoot)\src\app\GitExtensions.Extensibility\GitExtensions.Extensibility.csproj" />
   </ItemGroup>
 
+
+  <ItemDefinitionGroup>
+    <ProjectReference>
+      <ExcludeAssets>native</ExcludeAssets>
+    </ProjectReference>
+  </ItemDefinitionGroup>
 </Project>
