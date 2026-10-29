@@ -176,7 +176,13 @@ internal sealed partial class GhosttyTerminalControl : Control
 
         try
         {
-            _readerCts?.Cancel();
+            if (_readerCts is not null)
+            {
+                _readerCts.Cancel();
+                _readerCts.Dispose();
+                _readerCts = null;
+            }
+
             connection.Kill();
             connection.Dispose();
         }

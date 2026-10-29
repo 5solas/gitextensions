@@ -1,4 +1,4 @@
-namespace GitUI.ConsoleEmulation.Ghostty;
+﻿namespace GitUI.ConsoleEmulation.Ghostty;
 
 /// <summary>
 ///  Bit flags of the libghostty-vt <c>GhosttyMods</c> bitmask and <c>GhosttyKeyAction</c> values.

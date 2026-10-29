@@ -1,5 +1,4 @@
 ﻿using System.Drawing;
-using AwesomeAssertions;
 using GitUI.ConsoleEmulation.Ghostty;
 
 namespace GitUITests.ConsoleEmulation.Ghostty;
