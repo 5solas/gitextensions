@@ -1,5 +1,4 @@
-﻿using AwesomeAssertions;
-using GitUI.ConsoleEmulation;
+﻿using GitUI.ConsoleEmulation;
 using GitUI.ConsoleEmulation.Ghostty;
 using GitUI.ConsoleEmulation.PlainText;
 using GitUI.Shells;
