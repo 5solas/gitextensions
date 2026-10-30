@@ -34,6 +34,7 @@ internal sealed class GhosttyCommandRunner : IConsoleCommandRunner, IDisposable
         {
             Dock = DockStyle.Fill
         };
+        _control.ShowProcessExitMessage = false;
         _control.ApplyColorScheme(scheme);
         _control.ApplyFont(font);
 
