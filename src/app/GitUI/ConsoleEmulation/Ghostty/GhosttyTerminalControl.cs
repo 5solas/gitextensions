@@ -123,6 +123,11 @@ internal sealed partial class GhosttyTerminalControl : Control
     public ReadOnlyMemory<byte> LastOutputChunk => _lastOutputChunk;
 
     /// <summary>
+    ///  Gets or sets a value indicating whether the "[process exited with code N]" banner is written to the terminal when the process exits.
+    /// </summary>
+    internal bool ShowProcessExitMessage { get; set; } = true;
+
+    /// <summary>
     ///  Starts a PTY process with the specified application, arguments, working directory, and environment.
     ///  If a process is already running, the previous process is terminated and the terminal is reset.
     /// </summary>
@@ -644,11 +649,15 @@ internal sealed partial class GhosttyTerminalControl : Control
                 }
 
                 _isProcessRunning = false;
-                string message = $"\r\n[process exited with code {e.ExitCode}]\r\n";
-                byte[] messageBytes = Encoding.UTF8.GetBytes(message);
-                WriteToTerminal(messageBytes);
-                UpdateScrollbar();
-                Invalidate();
+                if (ShowProcessExitMessage)
+                {
+                    string message = $"\r\n[process exited with code {e.ExitCode}]\r\n";
+                    byte[] messageBytes = Encoding.UTF8.GetBytes(message);
+                    WriteToTerminal(messageBytes);
+                    UpdateScrollbar();
+                    Invalidate();
+                }
+
                 ProcessExited?.Invoke(this, e.ExitCode);
             });
         }
