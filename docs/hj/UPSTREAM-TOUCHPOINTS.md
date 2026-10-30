@@ -6,15 +6,16 @@
 
 ## 1. 포크 수정 업스트림 파일 목록 (Touchpoints)
 
-다음은 업스트림 원본 파일 중 포크(hj)에서 수정한 10개 파일의 목록과 목적, 머지 시 주의사항입니다.  
+다음은 업스트림 원본 파일 중 포크(hj)에서 수정한 11개 파일의 목록과 목적, 머지 시 주의사항입니다.  
 (`git diff --stat upstream/master -- . ':!src/app/GitUI/ConsoleEmulation/Ghostty' ':!tests' ':!docs' ':!eng/hj'` 기준)
 
 | 파일 경로 | 변경 내용 (무엇을) | 변경 사유 (왜) | 머지 시 주의사항 |
 | :--- | :--- | :--- | :--- |
 | `.gitignore` | `spike/` 항목 1줄 추가 | Ghostty 스파이크 탐색 산출물 디렉터리가 Git에 추적되지 않도록 방지 | 업스트림 `.gitignore` 변경 시 단순 추가 라인이므로 충돌 발생 가능성 낮음 |
 | `Directory.Packages.props` | `LibGhostty.Net` (버전 1.0.2) `PackageVersion` 항목 추가 | Ghostty VT 파서 및 PTY 바인딩 NuGet 패키지 의존성 선언 | 업스트림 패키지 목록과 알파벳 순 정렬 유지 |
+| `setup/installer/Product.wxs` | `LibGhostty.Net.dll` 컴포넌트, `runtimes/win-x64/native/*` 디렉터리 및 컴포넌트(`conpty.dll`, `ghostty-vt.dll`, `OpenConsole.exe`), `GitExtensions` Feature에 ComponentRef 등록 | 포터블 및 MSI 패키징 시 번들 일관성 검사(`_CheckBundlesConsistent`) 통과 및 Ghostty 네이티브 런타임 배포 | 업스트림 디렉터리 구조 및 Component/Feature 선언 규칙 유지 |
 | `src/app/GitCommands/Settings/AppSettings.cs` | `ConsoleEmulatorName` 기본값을 `"ConEmu"`에서 `"ghostty"`로 변경 | Git Extensions 콘솔 탭의 기본 에뮬레이터를 Ghostty로 사용 | 업스트림에서 새 설정이 추가되거나 순서가 바뀌어도 기본값 `"ghostty"` 유지 확인 |
-| `src/app/GitExtensions/Project.Publish.targets` | `CreateMsi` 타깃에 `Condition="'$(HjSkipMsi)' != 'true'"` 조건 속성 추가 | MSVC / WiX 도구 체인이 없는 개발 머신에서 `-SkipMsi` 옵션으로 릴리스 publish가 가능하도록 지원 | 업스트림에서 `CreateMsi` 타깃 속성이 변경될 경우 해당 `Condition` 조건 유지 |
+| `src/app/GitExtensions/Project.Publish.targets` | `CreateMsi` 타깃에 `Condition="'$(HjSkipMsi)' != 'true'"` 조건 속성 추가 및 `_CleanupBeforePack` 타깃에 비-Windows Ghostty 런타임(`runtimes/linux-*`, `runtimes/osx-*`) 파일·디렉터리 정리 추가 | MSVC / WiX 도구 체인이 없는 개발 머신에서 `-SkipMsi` 옵션으로 릴리스 publish 및 포터블 zip 패키징 지원 | 업스트림에서 `CreateMsi` 타깃 속성 및 `_CleanupBeforePack` 정리 항목 변경 시 포크 고유 정리 로직 유지 |
 | `src/app/GitUI/CommandsDialogs/FormBrowse.cs` | `DisposeConsoleTab()` 호출, `HandleSettingsChanged`에 콘솔 설정 변경 전달 및 `ApplyConsoleSettingsIfChanged` 호출, `FillTerminalTab` 핸들러 등록, `TestAccessor`에 콘솔 속성 노출 | 콘솔 탭의 생명주기 및 설정 반영 지원. 본체 로직은 `FormBrowse.ConsoleTab.cs` partial로 분리되어 업스트림 원본 대비 diff를 44줄로 최소화 | 업스트림 FormBrowse.cs 대규모 리팩터링 시에도 1줄 호출점들만 보존하면 충돌 방지 가능 |
 | `src/app/GitUI/CommandsDialogs/Menus/SettingsChangedEventArgs.cs` | `OldConsoleSettings` 속성 및 이를 받는 생성자 오버로드 추가 | 설정 대화상자 종료 후 콘솔 에뮬레이터/폰트/테마 설정 변경 여부를 감지 | 기존 2인자 생성자(`oldTranslation`, `oldCommitInfoPosition`)가 그대로 유지되므로 하위 호환성 문제 없음 |
 | `src/app/GitUI/CommandsDialogs/Menus/ToolsToolStripMenuItem.cs` | 설정 창 열기 전 `FormBrowse.CaptureConsoleSettings()` 호출 후 `SettingsChangedEventArgs`에 전달 | 메뉴바를 통해 설정을 열고 닫았을 때 콘솔 변경 사항 반영 | 업스트림의 메뉴 이벤트 로직 변경 시 `CaptureConsoleSettings()` 캡처 지점 유지 |
@@ -57,7 +58,7 @@
    git merge master
    ```
 4. **충돌 해결**:
-   - 충돌은 위 **1절의 표에 기재된 10개 파일**에서만 발생해야 합니다.
+   - 충돌은 위 **1절의 표에 기재된 11개 파일**에서만 발생해야 합니다.
    - 포크 전용 파일들은 업스트림과 겹치지 않으므로 충돌이 발생하지 않습니다.
    - 저장소에는 `rerere.enabled = true`, `merge.conflictstyle = zdiff3`가 설정되어 있어, 한 번 해결한 충돌 패턴은 자동으로 재적용됩니다.
 5. **빌드 및 회귀 테스트 수행**:
