@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Threading;
 using GitUI.ConsoleEmulation.Ghostty;
 
@@ -118,6 +118,111 @@ public sealed class GhosttyTerminalControlTests
         exitedEventCount.Should().Be(0);
 
         control.Stop();
+        form.Close();
+    }
+
+    [Test]
+    [Retry(2)]
+    [Apartment(ApartmentState.STA)]
+    public void ProcessExited_should_not_write_banner_when_ShowProcessExitMessage_is_false()
+    {
+        if (!GhosttySession.IsSupported)
+        {
+            Assert.Ignore("LibGhostty is not supported in the current environment.");
+        }
+
+        using Form form = new()
+        {
+            ClientSize = new Size(800, 600)
+        };
+
+        using GhosttyTerminalControl control = new()
+        {
+            Dock = DockStyle.Fill,
+            ShowProcessExitMessage = false
+        };
+
+        form.Controls.Add(control);
+        form.Show();
+        Application.DoEvents();
+
+        bool exited = false;
+        control.ProcessExited += (_, _) =>
+        {
+            exited = true;
+        };
+
+        string workingDirectory = TestContext.CurrentContext.TestDirectory;
+        control.Start("cmd.exe", ["/c", "exit 0"], workingDirectory, null);
+
+        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && !exited)
+        {
+            Application.DoEvents();
+            Thread.Sleep(20);
+        }
+
+        exited.Should().BeTrue();
+
+        control.Selection.Begin(0, 0);
+        control.Selection.Extend(control.Columns - 1, control.Rows - 1);
+        string screenText = control.ExtractSelectedTextForTest();
+
+        screenText.Should().NotContain("process exited");
+
+        form.Close();
+    }
+
+    [Test]
+    [Retry(2)]
+    [Apartment(ApartmentState.STA)]
+    public void ProcessExited_should_write_banner_when_ShowProcessExitMessage_is_true()
+    {
+        if (!GhosttySession.IsSupported)
+        {
+            Assert.Ignore("LibGhostty is not supported in the current environment.");
+        }
+
+        using Form form = new()
+        {
+            ClientSize = new Size(800, 600)
+        };
+
+        using GhosttyTerminalControl control = new()
+        {
+            Dock = DockStyle.Fill
+        };
+
+        control.ShowProcessExitMessage.Should().BeTrue();
+
+        form.Controls.Add(control);
+        form.Show();
+        Application.DoEvents();
+
+        bool exited = false;
+        control.ProcessExited += (_, _) =>
+        {
+            exited = true;
+        };
+
+        string workingDirectory = TestContext.CurrentContext.TestDirectory;
+        control.Start("cmd.exe", ["/c", "exit 0"], workingDirectory, null);
+
+        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && !exited)
+        {
+            Application.DoEvents();
+            Thread.Sleep(20);
+        }
+
+        exited.Should().BeTrue();
+
+        control.Selection.Begin(0, 0);
+        control.Selection.Extend(control.Columns - 1, control.Rows - 1);
+        string screenText = control.ExtractSelectedTextForTest();
+
+        screenText.Should().Contain("process exited with code 0");
+
         form.Close();
     }
 }
