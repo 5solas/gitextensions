@@ -36,6 +36,11 @@
           <Directory Id="DiffScriptsDir" Name="Diff-Scripts" />
           <Directory Id="DirConEmu" Name="ConEmu" />
           <Directory Id="ThemesDir" Name="Themes" />
+          <Directory Id="RuntimesDir" Name="runtimes">
+            <Directory Id="RuntimesWinX64Dir" Name="win-x64">
+              <Directory Id="RuntimesWinX64NativeDir" Name="native" />
+            </Directory>
+          </Directory>
         </Directory>
       </Directory>
       <Directory Id="LocalAppDataFolder">
@@ -144,6 +149,9 @@
       </Component>
       <Component Id="ICSharpCode.TextEditor.dll" Guid="*">
         <File Source="$(var.ArtifactsPublishPath)\ICSharpCode.TextEditor.dll" />
+      </Component>
+      <Component Id="LibGhostty.Net.dll" Guid="*">
+        <File Source="$(var.ArtifactsPublishPath)\LibGhostty.Net.dll" />
       </Component>
       <Component Id="Microsoft.AI.DependencyCollector.dll" Guid="*">
         <File Source="$(var.ArtifactsPublishPath)\Microsoft.AI.DependencyCollector.dll" />
@@ -791,6 +799,17 @@
         <File Source="$(var.ArtifactsPublishPath)\ConEmu\GitShowBranch.cmd" />
       </Component>
     </DirectoryRef>
+    <DirectoryRef Id="RuntimesWinX64NativeDir">
+      <Component Id="conpty.dll" Guid="*">
+        <File Source="$(var.ArtifactsPublishPath)\runtimes\win-x64\native\conpty.dll" />
+      </Component>
+      <Component Id="ghostty-vt.dll" Guid="*">
+        <File Source="$(var.ArtifactsPublishPath)\runtimes\win-x64\native\ghostty-vt.dll" />
+      </Component>
+      <Component Id="OpenConsole.exe" Guid="*">
+        <File Source="$(var.ArtifactsPublishPath)\runtimes\win-x64\native\OpenConsole.exe" />
+      </Component>
+    </DirectoryRef>
     <ComponentGroup Id="Component.ConEmuFiles">
       <ComponentRef Id="File.CER00" />
       <ComponentRef Id="File.CER01" />
@@ -849,8 +868,10 @@
       <ComponentRef Id="BugReporter.exe" />
       <ComponentRef Id="BugReporter.runtimeconfig.json" />
       <ComponentRef Id="ConEmuWinForms.dll" />
+      <ComponentRef Id="conpty.dll" />
       <ComponentRef Id="EnvDTE.dll" />
       <ComponentRef Id="ExCSS.dll" />
+      <ComponentRef Id="ghostty-vt.dll" />
       <ComponentRef Id="Git.hub.dll" />
       <ComponentRef Id="GitCommands.dll" />
       <ComponentRef Id="GitExtensions.deps.json" />
@@ -863,6 +884,7 @@
       <ComponentRef Id="GitUI.dll" />
       <ComponentRef Id="GitUIPluginInterfaces.dll" />
       <ComponentRef Id="ICSharpCode.TextEditor.dll" />
+      <ComponentRef Id="LibGhostty.Net.dll" />
       <ComponentRef Id="Microsoft.AI.DependencyCollector.dll" />
       <ComponentRef Id="Microsoft.ApplicationInsights.dll" />
       <ComponentRef Id="Microsoft.VisualStudio.Composition.dll" />
@@ -872,6 +894,7 @@
       <ComponentRef Id="Microsoft.VisualStudio.Validation.dll" />
       <ComponentRef Id="Microsoft.WindowsAPICodePack.dll" />
       <ComponentRef Id="Microsoft.WindowsAPICodePack.Shell.dll" />
+      <ComponentRef Id="OpenConsole.exe" />
       <ComponentRef Id="ResourceManager.dll" />
       <ComponentRef Id="RestSharp.dll" />
       <ComponentRef Id="SmartFormat.dll" />
