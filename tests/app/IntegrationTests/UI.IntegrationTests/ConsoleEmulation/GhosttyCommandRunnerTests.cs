@@ -221,6 +221,35 @@ public sealed class GhosttyCommandRunnerTests
         }
     }
 
+    [Test]
+    public void CommandRunner_should_display_Done_without_process_exit_message()
+    {
+        using Form form = new() { Width = 800, Height = 600 };
+        using GhosttyCommandRunner runner = new(GhosttyColorSchemes.Resolve(null, false), SystemFonts.DefaultFont);
+        form.Controls.Add(runner.Control);
+        runner.Control.Dock = DockStyle.Fill;
+        form.Show();
+
+        int? exitCode = null;
+        runner.CommandProcessExited += (_, e) => exitCode = e.ExitCode;
+
+        runner.StartCommand("cmd.exe", "/c echo hello", Environment.CurrentDirectory, []);
+
+        UITest.ProcessUntil("cmd.exe command finished", () => exitCode.HasValue, maxMilliseconds: 10_000);
+
+        exitCode.Should().Be(0);
+
+        GhosttyTerminalControl control = (GhosttyTerminalControl)runner.Control;
+        control.ShowProcessExitMessage.Should().BeFalse();
+
+        control.Selection.Begin(0, 0);
+        control.Selection.Extend(control.Columns - 1, control.Rows - 1);
+        string screenText = control.ExtractSelectedTextForTest();
+
+        screenText.Should().Contain("Done");
+        screenText.Should().NotContain("process exited");
+    }
+
     private static string FindRepositoryRoot()
     {
         string? current = TestContext.CurrentContext.TestDirectory;
