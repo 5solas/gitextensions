@@ -41,6 +41,39 @@ public sealed class GhosttyTerminalControlTests
     }
 
     [Test]
+    [Apartment(ApartmentState.STA)]
+    public void ApplyFont_should_update_cell_dimensions()
+    {
+        using GhosttyTerminalControl control = new();
+        using Font font9 = new("Consolas", 9f);
+        using Font font16 = new("Consolas", 16f);
+
+        control.ApplyFont(font9);
+        int cellWidth9 = control.CellWidth;
+        int cellHeight9 = control.CellHeight;
+
+        control.ApplyFont(font16);
+        int cellWidth16 = control.CellWidth;
+        int cellHeight16 = control.CellHeight;
+
+        cellHeight16.Should().BeGreaterThan(cellHeight9);
+        cellWidth16.Should().BeGreaterThan(cellWidth9);
+    }
+
+    [Test]
+    [Apartment(ApartmentState.STA)]
+    public void ApplyFont_on_new_control_should_preserve_default_grid_size()
+    {
+        using GhosttyTerminalControl control = new();
+        using Font font16 = new("Consolas", 16f);
+
+        control.ApplyFont(font16);
+
+        control.Columns.Should().Be(80);
+        control.Rows.Should().Be(24);
+    }
+
+    [Test]
     [Retry(2)]
     [Apartment(ApartmentState.STA)]
     public void Start_twice_should_not_report_stale_exit()
