@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using GitCommands;
 using GitCommands.Config;
 using GitCommands.Git;
@@ -226,6 +227,7 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
     private bool _fileBlameHistoryLeftPanelStartupState;
 
     private TabPage? _consoleTabPage;
+    private bool _consoleTabSelectingSubscribed;
     private OutputHistoryControllerBase? _outputHistoryController;
 
     private readonly Dictionary<Brush, Icon> _overlayIconByBrush = [];
@@ -463,6 +465,18 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
             _gitStatusMonitor?.Dispose();
             _windowsJumpListManager?.Dispose();
             _gpgInfoSequence.Dispose();
+
+            if (_consoleTabSelectingSubscribed)
+            {
+                CommitInfoTabControl.Selecting -= CommitInfoTabControl_Selecting;
+                _consoleTabSelectingSubscribed = false;
+            }
+
+            if (_terminal is IDisposable disposableRunner)
+            {
+                disposableRunner.Dispose();
+                _terminal = null;
+            }
         }
 
         base.Dispose(disposing);
@@ -1453,25 +1467,40 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         UICommands.StartMergeBranchDialog(this, null);
     }
 
+    internal readonly record struct ConsoleSettingsSnapshot(string EmulatorName, string Theme, string? FontKey, string Shell, bool ShowTab);
+
+    internal static ConsoleSettingsSnapshot CaptureConsoleSettings()
+    {
+        Font? font = AppSettings.ConEmuConsoleFont;
+        string? fontKey = font is null ? null : $"{font.Name}|{font.Size.ToString(CultureInfo.InvariantCulture)}|{font.Style}";
+        return new(
+            AppSettings.ConsoleEmulatorName.Value ?? string.Empty,
+            AppSettings.ConEmuStyle.Value ?? string.Empty,
+            fontKey,
+            AppSettings.ConEmuTerminal.Value ?? string.Empty,
+            AppSettings.ShowConEmuTab.Value);
+    }
+
     private void toolsToolStripMenuItem_SettingsChanged(object sender, Menus.SettingsChangedEventArgs e)
     {
-        HandleSettingsChanged(e.OldTranslation, e.OldCommitInfoPosition);
+        HandleSettingsChanged(e.OldTranslation, e.OldCommitInfoPosition, e.OldConsoleSettings);
     }
 
     private void OnShowSettingsClick(object sender, EventArgs e)
     {
         string translation = AppSettings.Translation;
         CommitInfoPosition commitInfoPosition = AppSettings.CommitInfoPosition;
+        ConsoleSettingsSnapshot consoleSettings = CaptureConsoleSettings();
 
         // Await plugin registration
         _loadOperations.JoinPendingOperations();
 
         UICommands.StartSettingsDialog(this);
 
-        HandleSettingsChanged(translation, commitInfoPosition);
+        HandleSettingsChanged(translation, commitInfoPosition, consoleSettings);
     }
 
-    private void HandleSettingsChanged(string oldTranslation, CommitInfoPosition oldCommitInfoPosition)
+    private void HandleSettingsChanged(string oldTranslation, CommitInfoPosition oldCommitInfoPosition, ConsoleSettingsSnapshot oldConsoleSettings)
     {
         Module?.InvalidateGitSettings();
 
@@ -1483,6 +1512,11 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         if (oldCommitInfoPosition != AppSettings.CommitInfoPosition)
         {
             LayoutRevisionInfo();
+        }
+
+        if (oldConsoleSettings != CaptureConsoleSettings())
+        {
+            ResetTerminalTab(oldConsoleSettings.ShowTab);
         }
 
         LoadHotkeys(HotkeySettingsName);
@@ -2719,6 +2753,44 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         }
     }
 
+    private void CommitInfoTabControl_Selecting(object? sender, TabControlCancelEventArgs args)
+    {
+        if (args.TabPage != _consoleTabPage)
+        {
+            return;
+        }
+
+        EnsureTerminalCreatedAndStarted();
+    }
+
+    private void EnsureTerminalCreatedAndStarted()
+    {
+        if (_consoleTabPage is null)
+        {
+            return;
+        }
+
+        if (_terminal is null)
+        {
+            _terminal = _consoleEmulatorsRegistry.CreateShellRunner();
+            if (_terminal is null)
+            {
+                return;
+            }
+
+            _terminal.Control.Dock = DockStyle.Fill;
+            _consoleTabPage.Controls.Add(_terminal.Control);
+        }
+
+        if (_terminal.IsShellRunning)
+        {
+            _terminal.FocusTerminal();
+            return;
+        }
+
+        _terminal.StartShell(Module.WorkingDir);
+    }
+
     /// <summary>
     /// Adds a tab with console interface to Git over the current working copy. Recreates the terminal on tab activation if user exits the shell.
     /// Uses the configured console emulator (plugin or ConEmu).
@@ -2759,34 +2831,51 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         // We have to set ImageKey after it's added to the tab control
         _consoleTabPage.ImageKey = nameof(Images.Console);
 
-        // Delay-create the terminal window when the tab is first selected
-        CommitInfoTabControl.Selecting += (sender, args) =>
+        if (!_consoleTabSelectingSubscribed)
         {
-            if (args.TabPage != _consoleTabPage)
+            CommitInfoTabControl.Selecting += CommitInfoTabControl_Selecting;
+            _consoleTabSelectingSubscribed = true;
+        }
+    }
+
+    private void ResetTerminalTab(bool oldShowTab)
+    {
+        if (_terminal is not null)
+        {
+            _consoleTabPage?.Controls.Remove(_terminal.Control);
+            if (_terminal is IDisposable disposableRunner)
             {
-                return;
+                disposableRunner.Dispose();
+            }
+            else
+            {
+                _terminal.Control.Dispose();
             }
 
-            if (_terminal is null)
-            {
-                _terminal = _consoleEmulatorsRegistry.CreateShellRunner();
-                if (_terminal is null)
-                {
-                    return;
-                }
+            _terminal = null;
+        }
 
-                _terminal.Control.Dock = DockStyle.Fill;
-                _consoleTabPage!.Controls.Add(_terminal.Control);
+        if (!AppSettings.ShowConEmuTab)
+        {
+            if (_consoleTabPage is not null)
+            {
+                CommitInfoTabControl.RemoveIfExists(_consoleTabPage);
+                _consoleTabPage.Dispose();
+                _consoleTabPage = null;
             }
 
-            if (_terminal.IsShellRunning)
-            {
-                _terminal.FocusTerminal();
-                return;
-            }
+            return;
+        }
 
-            _terminal.StartShell(Module.WorkingDir);
-        };
+        if (_consoleTabPage is null)
+        {
+            FillTerminalTab();
+        }
+
+        if (_consoleTabPage is not null && CommitInfoTabControl.SelectedTab == _consoleTabPage)
+        {
+            EnsureTerminalCreatedAndStarted();
+        }
     }
 
     public void ChangeTerminalActiveFolder(string path)
@@ -3092,6 +3181,10 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         public TabPage CommitInfoTabPage => _form.CommitInfoTabPage;
         public IConsoleShellRunner? Terminal => _form._terminal;
         public TabPage? ConsoleTabPage => _form._consoleTabPage;
+
+        public ConsoleSettingsSnapshot CaptureConsoleSettings() => FormBrowse.CaptureConsoleSettings();
+        public void HandleSettingsChanged(ConsoleSettingsSnapshot oldConsoleSettings) => _form.HandleSettingsChanged(AppSettings.Translation, AppSettings.CommitInfoPosition, oldConsoleSettings);
+        public void ResetTerminalTab(bool oldShowTab = true) => _form.ResetTerminalTab(oldShowTab);
 
         public void RefreshRevisions() => _form.RefreshRevisions();
         public void SetWorkingDir(string? path) => _form.SetWorkingDir(path);
