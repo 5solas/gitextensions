@@ -103,6 +103,16 @@ internal sealed partial class GhosttyTerminalControl : Control
     public int Rows => _rows;
 
     /// <summary>
+    ///  Gets the width of a character cell in pixels.
+    /// </summary>
+    internal int CellWidth => _cellWidth;
+
+    /// <summary>
+    ///  Gets the height of a character cell in pixels.
+    /// </summary>
+    internal int CellHeight => _cellHeight;
+
+    /// <summary>
     ///  Gets the native libghostty terminal handle, or <see cref="IntPtr.Zero"/> if not yet initialized.
     /// </summary>
     public IntPtr TerminalHandle => _terminal;
@@ -404,8 +414,14 @@ internal sealed partial class GhosttyTerminalControl : Control
             return;
         }
 
-        int availableWidth = Math.Max(1, ClientRectangle.Width - (_scrollBar.Visible ? _scrollBar.Width : 0));
-        int availableHeight = Math.Max(1, ClientRectangle.Height);
+        int availableWidth = ClientRectangle.Width - (_scrollBar.Visible ? _scrollBar.Width : 0);
+        int availableHeight = ClientRectangle.Height;
+
+        if (availableWidth < _cellWidth || availableHeight < _cellHeight)
+        {
+            return;
+        }
+
         int newColumns = Math.Max(1, availableWidth / _cellWidth);
         int newRows = Math.Max(1, availableHeight / _cellHeight);
 

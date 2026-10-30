@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Linq;
 using System.Text.RegularExpressions;
 using CommonTestUtils;
 using GitCommands;
@@ -156,6 +157,134 @@ public sealed class GhosttyConsoleTabTests
             int exitMessageCount = Regex.Matches(extractedText, @"\[process exited").Count;
             exitMessageCount.Should().BeInRange(0, 1);
         });
+    }
+
+    [Test]
+    public void ConsoleTab_should_recreate_terminal_when_console_settings_change()
+    {
+        string originalTheme = AppSettings.ConEmuStyle.Value;
+        try
+        {
+            RunFormTest(form =>
+            {
+                (GhosttyShellRunner runnerA, GhosttyTerminalControl controlA) = OpenConsoleTab(form);
+                FormBrowse.TestAccessor testAccessor = form.GetTestAccessor();
+                FormBrowse.ConsoleSettingsSnapshot oldSettings = testAccessor.CaptureConsoleSettings();
+
+                string newTheme = string.Equals(originalTheme, "Dracula", StringComparison.OrdinalIgnoreCase)
+                    ? "Tomorrow"
+                    : "Dracula";
+                AppSettings.ConEmuStyle.Value = newTheme;
+
+                testAccessor.HandleSettingsChanged(oldSettings);
+
+                UITest.ProcessUntil(
+                    "terminal recreated and running",
+                    () => testAccessor.Terminal is GhosttyShellRunner runnerB
+                          && runnerB != runnerA
+                          && runnerB.IsShellRunning,
+                    maxMilliseconds: 10_000);
+
+                testAccessor.Terminal.Should().NotBeSameAs(runnerA);
+                testAccessor.Terminal!.IsShellRunning.Should().BeTrue();
+                controlA.IsDisposed.Should().BeTrue();
+            });
+        }
+        finally
+        {
+            AppSettings.ConEmuStyle.Value = originalTheme;
+        }
+    }
+
+    [Test]
+    public void ConsoleTab_should_be_removed_when_ShowConEmuTab_turned_off()
+    {
+        bool originalShowTab = AppSettings.ShowConEmuTab.Value;
+        try
+        {
+            RunFormTest(form =>
+            {
+                OpenConsoleTab(form);
+                FormBrowse.TestAccessor testAccessor = form.GetTestAccessor();
+
+                testAccessor.ConsoleTabPage.Should().NotBeNull();
+                testAccessor.Terminal.Should().NotBeNull();
+                testAccessor.CommitInfoTabControl.TabPages.Contains(testAccessor.ConsoleTabPage!).Should().BeTrue();
+
+                FormBrowse.ConsoleSettingsSnapshot oldSettings = testAccessor.CaptureConsoleSettings();
+                AppSettings.ShowConEmuTab.Value = false;
+                testAccessor.HandleSettingsChanged(oldSettings);
+
+                testAccessor.ConsoleTabPage.Should().BeNull();
+                testAccessor.Terminal.Should().BeNull();
+                testAccessor.CommitInfoTabControl.TabPages.Cast<TabPage>()
+                    .Any(page => page.Name == "Console" || page.Text == "Console")
+                    .Should().BeFalse();
+
+                FormBrowse.ConsoleSettingsSnapshot hiddenSettings = testAccessor.CaptureConsoleSettings();
+                AppSettings.ShowConEmuTab.Value = true;
+                testAccessor.HandleSettingsChanged(hiddenSettings);
+
+                testAccessor.ConsoleTabPage.Should().NotBeNull();
+                testAccessor.CommitInfoTabControl.TabPages.Contains(testAccessor.ConsoleTabPage!).Should().BeTrue();
+            });
+        }
+        finally
+        {
+            AppSettings.ShowConEmuTab.Value = originalShowTab;
+        }
+    }
+
+    [Test]
+    public void ConsoleTab_should_apply_font_and_theme_when_settings_change()
+    {
+        Font? originalFont = AppSettings.ConEmuConsoleFont;
+        string originalTheme = AppSettings.ConEmuStyle.Value;
+        try
+        {
+            RunFormTest(form =>
+            {
+                (GhosttyShellRunner runnerA, GhosttyTerminalControl controlA) = OpenConsoleTab(form);
+                int cellHeightA = controlA.CellHeight;
+
+                FormBrowse.TestAccessor testAccessor = form.GetTestAccessor();
+                FormBrowse.ConsoleSettingsSnapshot snapshot = testAccessor.CaptureConsoleSettings();
+
+                using Font newFont = new("Consolas", 16f);
+                AppSettings.ConEmuConsoleFont = newFont;
+                AppSettings.ConEmuStyle.Value = "Dracula";
+
+                testAccessor.HandleSettingsChanged(snapshot);
+
+                UITest.ProcessUntil(
+                    "terminal recreated with new font and Dracula theme",
+                    () => testAccessor.Terminal is GhosttyShellRunner runnerB
+                          && runnerB != runnerA
+                          && runnerB.IsShellRunning,
+                    maxMilliseconds: 10_000);
+
+                GhosttyShellRunner newRunner = (GhosttyShellRunner)testAccessor.Terminal!;
+                GhosttyTerminalControl newControl = (GhosttyTerminalControl)newRunner.Control;
+
+                newControl.CellHeight.Should().BeGreaterThan(cellHeightA);
+
+                UITest.ProcessEventsFor(500);
+
+                using Bitmap bitmap = new(newControl.Width, newControl.Height);
+                newControl.DrawToBitmap(bitmap, new Rectangle(Point.Empty, newControl.Size));
+                Color pixelColor = bitmap.GetPixel(2, 2);
+                GhosttyColorScheme draculaScheme = GhosttyColorSchemes.TryGet("Dracula")!;
+
+                pixelColor.R.Should().BeCloseTo(draculaScheme.Background.R, 5);
+                pixelColor.G.Should().BeCloseTo(draculaScheme.Background.G, 5);
+                pixelColor.B.Should().BeCloseTo(draculaScheme.Background.B, 5);
+            });
+        }
+        finally
+        {
+            AppSettings.ConEmuConsoleFont = originalFont;
+            AppSettings.ConEmuStyle.Value = originalTheme;
+        }
     }
 
     [Test]
