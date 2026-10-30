@@ -18,12 +18,18 @@
 1. **포크 버전 번호 증가**:
    - `eng/hj/VERSION` 파일을 열고 버전 번호를 1 증가시킵니다. (예: `1` -> `2`)
 2. **릴리스 스크립트 실행**:
-   ```pwsh
-   pwsh eng/hj/Release.ps1 -Configuration Release -SkipPublish
-   ```
+   - **포터블 zip 패키징 제작 (-SkipMsi)**:
+     ```pwsh
+     pwsh eng/hj/Release.ps1 -Configuration Release -SkipMsi
+     ```
+   - **어셈블리 빌드만 수행할 때 (-SkipPublish)**:
+     ```pwsh
+     pwsh eng/hj/Release.ps1 -Configuration Release -SkipPublish
+     ```
    - 작업 트리에 커밋되지 않은 변경 사항이 있을 때는 `-AllowDirty`를 추가합니다.
    - 태그를 함께 생성하려면 `-Tag` 옵션을 지정합니다. (annotated tag 메시지에 `upstream-base: <merge-base commit>` 자동 포함)
 3. **산출물 확인**:
+   - 포터블 패키지 zip: `artifacts/Release/publish/GitExtensions-Portable-x64-<BUILD_VERSION_BASE>.<HjNumber>-hj-<HjNumber>-<GitCommit>.zip` (예: `GitExtensions-Portable-x64-7.3.0.1-hj-1-b8c365975.zip`)
    - 컴파일된 실행 파일: `artifacts/Release/bin/GitExtensions/net10.0-windows/GitExtensions.exe` 및 `GitExtensions.dll`
    - 버전 정보 확인:
      ```pwsh
@@ -37,8 +43,8 @@
 
 1. **네이티브 C++ 빌드 도구 부재 (MSVC)**:
    - 현재 개발 환경에는 Visual Studio C++ 도구 체인(MSVC)이 설치되어 있지 않으므로 `src/native/build.proj` 빌드가 수행되지 않습니다.
-   - 따라서 `GitExtensionsShellEx` (셸 확장 dll) 및 `GitExtSshAskPass` (SSH 패스워드 프롬프트 exe) 등의 네이티브 바이너리는 빌드되지 않습니다.
-2. **`dotnet publish` 및 번들/MSI 패키징**:
-   - `dotnet publish` 시 실행되는 WiX / 번들 일관성 검사(`_CheckBundlesConsistent`)는 `Product.wxs`에 선언된 파일과 실제 산출물을 대조합니다.
-   - 포크에서 새로 도입한 Ghostty 네이티브 런타임 파일(`ghostty-vt.dll`, `LibGhostty.Net.dll` 등) 및 위의 C++ 네이티브 산출물이 누락되어 있어 publish 단계에서 오류가 발생합니다.
-   - 따라서 현재 환경에서는 **`-SkipPublish`** 옵션을 사용하여 .NET 어셈블리를 빌드 및 스탬핑하여 사용하며, 완전한 설치 패키지(MSI) 및 Zip 번들 제작은 MSVC 및 WiX 환경이 갖춰진 CI 환경에서 수행합니다.
+   - 따라서 `GitExtensionsShellEx` (셸 확장 dll) 및 `GitExtSshAskPass` (SSH 패스워드 프롬프트 exe) 등의 네이티브 C++ 바이너리는 빌드되지 않습니다.
+2. **설치 패키지(MSI) 빌드 (`-SkipMsi` 필요)**:
+   - 현재 로컬 개발 머신에는 WiX 툴체인 및 MSVC 네이티브 C++ 산출물이 없으므로 로컬에서는 `-SkipMsi` 옵션을 사용하여 포터블 zip 번들을 제작합니다.
+   - 포터블 zip 및 publish 산출물에는 Ghostty Windows 네이티브 런타임(`LibGhostty.Net.dll`, `runtimes/win-x64/native/*`)이 정상 포함되며, `Product.wxs` 선언 및 번들 일관성 검사(`_CheckBundlesConsistent`)를 통과합니다.
+   - 완전한 설치 패키지(MSI) 제작은 MSVC 및 WiX 환경이 갖춰진 CI 환경에서 수행합니다.
