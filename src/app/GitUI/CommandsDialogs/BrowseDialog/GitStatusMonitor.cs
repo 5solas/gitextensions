@@ -496,6 +496,7 @@ public sealed class GitStatusMonitor : IDisposable
                 {
                     try
                     {
+                        (long Length, DateTime LastWriteTimeUtc)? indexKeyBefore = (module as GitModule)?.GetIndexKey();
                         ArgumentString cmd = Commands.GetAllChangedFiles(excludeIgnoredFiles: true, UntrackedFilesMode.Default, noLocks: noLocks);
                         ExecutionResult result = await module.GitExecutable.ExecuteAsync(cmd, cancellationToken: cancelToken);
 
@@ -503,10 +504,16 @@ public sealed class GitStatusMonitor : IDisposable
                         {
                             // Update callers also if cancelled, this is for the correct module
                             string output = result.StandardOutput;
-                            IReadOnlyList<GitItemStatus> changedFiles = _getAllChangedFilesOutputParser.Parse(output);
+                            ChangedFilesParseResult parseResult = _getAllChangedFilesOutputParser.ParseResult(output);
+
+                            (long Length, DateTime LastWriteTimeUtc)? indexKeyAfter = (module as GitModule)?.GetIndexKey();
+                            if (indexKeyBefore is not null && indexKeyBefore == indexKeyAfter && indexKeyAfter.HasValue)
+                            {
+                                (module as GitModule)?.InjectConflictCache(indexKeyAfter.Value, parseResult.HasUnmergedEntries);
+                            }
 
                             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancelToken);
-                            GitWorkingDirectoryStatusChanged?.Invoke(this, new GitWorkingDirectoryStatusEventArgs(changedFiles));
+                            GitWorkingDirectoryStatusChanged?.Invoke(this, new GitWorkingDirectoryStatusEventArgs(parseResult.Items, parseResult.HasUnmergedEntries));
                         }
 
                         _consecutiveErrorCount = 0;

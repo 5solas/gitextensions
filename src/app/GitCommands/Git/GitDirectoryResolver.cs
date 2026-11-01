@@ -18,7 +18,7 @@ public interface IGitDirectoryResolver
 /// <summary>
 /// Resolves the location of .git folder.
 /// </summary>
-public sealed class GitDirectoryResolver : IGitDirectoryResolver
+public sealed partial class GitDirectoryResolver : IGitDirectoryResolver
 {
     private readonly IFileSystem _fileSystem;
 
