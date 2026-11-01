@@ -803,7 +803,7 @@
       <Component Id="conpty.dll" Guid="*">
         <File Source="$(var.ArtifactsPublishPath)\runtimes\win-x64\native\conpty.dll" />
       </Component>
-      <Component Id="ghostty-vt.dll" Guid="*">
+      <Component Id="ghostty_vt.dll" Guid="*">
         <File Source="$(var.ArtifactsPublishPath)\runtimes\win-x64\native\ghostty-vt.dll" />
       </Component>
       <Component Id="OpenConsole.exe" Guid="*">
@@ -871,7 +871,7 @@
       <ComponentRef Id="conpty.dll" />
       <ComponentRef Id="EnvDTE.dll" />
       <ComponentRef Id="ExCSS.dll" />
-      <ComponentRef Id="ghostty-vt.dll" />
+      <ComponentRef Id="ghostty_vt.dll" />
       <ComponentRef Id="Git.hub.dll" />
       <ComponentRef Id="GitCommands.dll" />
       <ComponentRef Id="GitExtensions.deps.json" />
