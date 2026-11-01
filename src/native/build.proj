@@ -20,7 +20,7 @@
 
     <!-- Work out VS installation path, so we can find MSBuild.exe -->
     <Exec
-        Command="vswhere.exe -latest -prerelease -property installationPath -requires Microsoft.Component.MSBuild"
+        Command="&quot;$(VSWherePath)\vswhere.exe&quot; -latest -prerelease -products * -property installationPath -requires Microsoft.Component.MSBuild"
         WorkingDirectory="$(VSWherePath)"
         EchoOff="true"
         ConsoleToMsBuild="true"
@@ -45,7 +45,7 @@
     <!-- Build GitExtSshAskPass project, x86 -->
     <Exec
         Condition="'$(TargetPlatform)' != 'arm64'"
-        Command="msbuild.exe $(_GitExtSshAskPassPath) $(_ProjectArgs32) /p:OutDir=$(_OutputPath)GitExtSshAskPass\ /bl:$(_ArtifactsLogDir)\GitExtSshAskPass.binlog"
+        Command="&quot;$(_MSBuildCurrentPath)\msbuild.exe&quot; $(_GitExtSshAskPassPath) $(_ProjectArgs32) /p:OutDir=$(_OutputPath)GitExtSshAskPass\ /bl:$(_ArtifactsLogDir)\GitExtSshAskPass.binlog"
         WorkingDirectory="$(_MSBuildCurrentPath)"
         EchoOff="true"
         ConsoleToMsBuild="true"
@@ -54,7 +54,7 @@
     <!-- Build GitExtSshAskPass project, ARM64 -->
     <Exec
         Condition="'$(TargetPlatform)' == 'arm64'"
-        Command="msbuild.exe $(_GitExtSshAskPassPath) $(_ProjectArgsARM64) /p:OutDir=$(_OutputPath)GitExtSshAskPass\ /bl:$(_ArtifactsLogDir)\GitExtSshAskPass.binlog"
+        Command="&quot;$(_MSBuildCurrentPath)\msbuild.exe&quot; $(_GitExtSshAskPassPath) $(_ProjectArgsARM64) /p:OutDir=$(_OutputPath)GitExtSshAskPass\ /bl:$(_ArtifactsLogDir)\GitExtSshAskPass.binlog"
         WorkingDirectory="$(_MSBuildCurrentPath)"
         EchoOff="true"
         ConsoleToMsBuild="true"
@@ -63,7 +63,7 @@
     <!-- Build GitExtensionsShellEx project, x86 -->
     <Exec
         Condition="'$(TargetPlatform)' != 'arm64'"
-        Command="msbuild.exe $(_GitExtensionsShellExPath) $(_ProjectArgs32) /p:OutDir=$(_OutputPath)GitExtensionsShellEx\ /bl:$(_ArtifactsLogDir)\GitExtensionsShellEx32.binlog"
+        Command="&quot;$(_MSBuildCurrentPath)\msbuild.exe&quot; $(_GitExtensionsShellExPath) $(_ProjectArgs32) /p:OutDir=$(_OutputPath)GitExtensionsShellEx\ /bl:$(_ArtifactsLogDir)\GitExtensionsShellEx32.binlog"
         WorkingDirectory="$(_MSBuildCurrentPath)"
         EchoOff="true"
         ConsoleToMsBuild="true"
@@ -72,7 +72,7 @@
     <!-- Build GitExtensionsShellEx project, x64 -->
     <Exec
         Condition="'$(TargetPlatform)' != 'arm64'"
-        Command="msbuild.exe $(_GitExtensionsShellExPath) $(_ProjectArgs64) /p:OutDir=$(_OutputPath)GitExtensionsShellEx\ /bl:$(_ArtifactsLogDir)\GitExtensionsShellEx64.binlog"
+        Command="&quot;$(_MSBuildCurrentPath)\msbuild.exe&quot; $(_GitExtensionsShellExPath) $(_ProjectArgs64) /p:OutDir=$(_OutputPath)GitExtensionsShellEx\ /bl:$(_ArtifactsLogDir)\GitExtensionsShellEx64.binlog"
         WorkingDirectory="$(_MSBuildCurrentPath)"
         EchoOff="true"
         ConsoleToMsBuild="true"
@@ -81,7 +81,7 @@
     <!-- Build GitExtensionsShellEx project, ARM64 -->
     <Exec
         Condition="'$(TargetPlatform)' == 'arm64'"
-        Command="msbuild.exe $(_GitExtensionsShellExPath) $(_ProjectArgsARM64) /p:OutDir=$(_OutputPath)GitExtensionsShellEx\ /bl:$(_ArtifactsLogDir)\GitExtensionsShellEx64.binlog"
+        Command="&quot;$(_MSBuildCurrentPath)\msbuild.exe&quot; $(_GitExtensionsShellExPath) $(_ProjectArgsARM64) /p:OutDir=$(_OutputPath)GitExtensionsShellEx\ /bl:$(_ArtifactsLogDir)\GitExtensionsShellEx64.binlog"
         WorkingDirectory="$(_MSBuildCurrentPath)"
         EchoOff="true"
         ConsoleToMsBuild="true"
