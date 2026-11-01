@@ -73,4 +73,16 @@ public class GetAllChangedFilesOutputParserTest
         await Verifier.VerifyJson(JsonSerializer.Serialize(statuses))
             .UseParameters(testName);
     }
+
+    [TestCase("u AA N... 000000 100644 100644 100644 0000000000000000000000000000000000000000 61780798228d17af2d34fce4cfbdf35556832472 78981922613b2afb6025042ff6bd878ac1994e85 t.t", true, false)]
+    [TestCase("u DD N... 100644 000000 000000 000000 3c70853f1ed9b82635f0763dd1373c3101e79d5d 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 GitUI/CommandsDialogs/FormFormatPatch.cs", true, false)]
+    [TestCase("1 .M S..U 160000 160000 160000 cbca134e29be13b35f21ca4553ba04f796324b1c cbca134e29be13b35f21ca4553ba04f796324b1c subm1\0", false, false)]
+    public void ParseResult_should_detect_HasUnmergedEntries_for_AA_and_DD(string statusString, bool expectedHasUnmerged, bool expectedIsUnmergedOnItems)
+    {
+        GitModule module = new(new GitExecutorProvider(new GitDirectoryResolver()), Path.GetTempPath());
+        GetAllChangedFilesOutputParser parser = new(() => module);
+        ChangedFilesParseResult result = parser.ParseResult(statusString);
+        result.HasUnmergedEntries.Should().Be(expectedHasUnmerged);
+        result.Items.Any(item => item.IsUnmerged).Should().Be(expectedIsUnmergedOnItems);
+    }
 }
