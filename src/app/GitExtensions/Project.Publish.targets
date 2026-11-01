@@ -299,7 +299,7 @@
     </PropertyGroup>
 
     <Exec
-        Command="vswhere.exe -latest -prerelease -property installationPath -requires Microsoft.Component.MSBuild"
+        Command="&quot;$(VSWherePath)\vswhere.exe&quot; -latest -prerelease -products * -property installationPath -requires Microsoft.Component.MSBuild"
         WorkingDirectory="$(VSWherePath)"
         EchoOff="true"
         ConsoleToMsBuild="true"
@@ -326,7 +326,7 @@
         />
       -->
     <Exec
-        Command="msbuild.exe $(RepoRoot)\setup\installer\Setup.wixproj /v:q /t:Build $(_SetupArgs) /bl:$(ArtifactsLogDir)\setup.binlog"
+        Command="&quot;$(_MSBuildCurrentPath)\msbuild.exe&quot; $(RepoRoot)\setup\installer\Setup.wixproj /v:q /t:Build $(_SetupArgs) /bl:$(ArtifactsLogDir)\setup.binlog"
         WorkingDirectory="$(_MSBuildCurrentPath)"
         EchoOff="true"
         ConsoleToMsBuild="true"
