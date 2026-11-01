@@ -24,7 +24,7 @@
 .PARAMETER SkipBuild
     Skips dotnet build step.
 .PARAMETER Topics
-    Path to topics list file (default: eng/hj/topics.txt).
+    Path to topics list file (default: hj/infra:eng/hj/topics.txt with fallback to eng/hj/topics.txt).
 .PARAMETER DryRun
     Tests rebase and merge using temporary branches (tmp/sync-*) without altering real branches.
 .PARAMETER AllowDirty
@@ -36,7 +36,7 @@ param(
     [switch]$Push,
     [switch]$SkipTests,
     [switch]$SkipBuild,
-    [string]$Topics = "eng/hj/topics.txt",
+    [string]$Topics,
     [switch]$DryRun,
     [switch]$AllowDirty
 )
@@ -91,18 +91,42 @@ $repoRoot = $repoRoot.Trim()
 Set-Location $repoRoot
 
 # Resolve topics file path
-if (-not [System.IO.Path]::IsPathRooted($Topics)) {
-    $Topics = Join-Path $repoRoot $Topics
-}
-if (-not (Test-Path $Topics)) {
-    Write-Error "Topics file not found at: $Topics"
-    exit 1
+$tempTopicsFile = $null
+$topicsSourceDescription = $null
+$resolvedTopicsPath = $null
+
+if ($PSBoundParameters.ContainsKey('Topics') -and -not [string]::IsNullOrWhiteSpace($Topics)) {
+    # Custom topics file specified via -Topics
+    $topicsSourceDescription = $Topics
+    $resolvedTopicsPath = if ([System.IO.Path]::IsPathRooted($Topics)) { $Topics } else { Join-Path $repoRoot $Topics }
+    if (-not (Test-Path $resolvedTopicsPath)) {
+        Write-Error "Topics file not found at: $resolvedTopicsPath"
+        exit 1
+    }
+} else {
+    # Default: read topics from hj/infra branch (hj/infra:eng/hj/topics.txt)
+    $infraTopics = & git show "hj/infra:eng/hj/topics.txt" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $infraTopics) {
+        $tempTopicsFile = Join-Path ([System.IO.Path]::GetTempPath()) ("hj-topics-" + [Guid]::NewGuid().ToString("N") + ".txt")
+        Set-Content -Path $tempTopicsFile -Value $infraTopics -Encoding utf8
+        $resolvedTopicsPath = $tempTopicsFile
+        $topicsSourceDescription = "hj/infra:eng/hj/topics.txt"
+    } else {
+        Write-Warning "Could not read topics from 'hj/infra:eng/hj/topics.txt'. Falling back to working tree 'eng/hj/topics.txt'."
+        $fallbackTopics = Join-Path $repoRoot "eng/hj/topics.txt"
+        if (-not (Test-Path $fallbackTopics)) {
+            Write-Error "Topics file not found at: $fallbackTopics"
+            exit 1
+        }
+        $resolvedTopicsPath = $fallbackTopics
+        $topicsSourceDescription = "eng/hj/topics.txt"
+    }
 }
 
 # Read topic list (ignoring empty lines and comments)
-$topicLines = @(Get-Content -Path $Topics | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+$topicLines = @(Get-Content -Path $resolvedTopicsPath | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
 if ($topicLines.Count -eq 0) {
-    Write-Error "No topic branches specified in $Topics."
+    Write-Error "No topic branches specified in $topicsSourceDescription."
     exit 1
 }
 
@@ -470,7 +494,7 @@ try {
         # Check if topic is now empty (identical to master / upstream)
         $isAdopted = ($afterCount -eq 0 -or $afterSha -eq $upstreamMasterSha)
         if ($isAdopted) {
-            Write-Warning "Topic '$topic' is fully adopted upstream - consider removing it from $Topics"
+            Write-Warning "Topic '$topic' is fully adopted upstream - consider removing it from $topicsSourceDescription"
         }
 
         $topicStatus = "Rebased"
@@ -757,6 +781,7 @@ try {
     }
     Write-Host ""
     Write-Host "Topic Branches:" -ForegroundColor White
+    Write-Host "Topics source: $topicsSourceDescription ($($topicLines.Count) topics)"
     $topicSummaryView = $topicResults | Select-Object @{N="Topic";E={$_.Topic}},
         @{N="Before SHA";E={$_.BeforeSha.Substring(0, [System.Math]::Min(9, $_.BeforeSha.Length))}},
         @{N="After SHA";E={$_.AfterSha.Substring(0, [System.Math]::Min(9, $_.AfterSha.Length))}},
@@ -778,7 +803,9 @@ try {
     Write-Host "  New SHA      : $newHjMainSha"
     Write-Host ""
 
-    Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+    if (-not $DryRun) {
+        Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+    }
 
     if (-not $SkipBuild) {
         Write-Host "Build: Passed" -ForegroundColor Green
@@ -841,8 +868,18 @@ try {
 
 } finally {
     # -------------------------------------------------------------------------
-    # Step K & L: Cleanup Temporary Branches & Restore Original Branch
+    # Step K & L: Cleanup Temporary Branches, Backup Refs & Restore Original Branch
     # -------------------------------------------------------------------------
+    if ($tempTopicsFile -and (Test-Path $tempTopicsFile)) {
+        Remove-Item -Path $tempTopicsFile -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($DryRun -and $backupRefs -and $backupRefs.Count -gt 0) {
+        foreach ($bRef in $backupRefs.Values) {
+            & git update-ref -d $bRef 2>$null
+        }
+    }
+
     if ($createdTempBranches.Count -gt 0) {
         # Switch away before deleting temporary branches
         & git checkout $originalBranch 2>$null
