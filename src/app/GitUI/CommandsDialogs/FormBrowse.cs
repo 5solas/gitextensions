@@ -372,6 +372,11 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
 
             gitStatusMonitor.GitWorkingDirectoryStatusChanged += (s, e) =>
             {
+                if (e is not null)
+                {
+                    notificationBarGitActionInProgress.UpdateConflictStatus(e.HasUnmergedEntries);
+                }
+
                 IReadOnlyList<GitItemStatus>? status = e?.ItemStatuses;
 
                 bool countToolbar = AppSettings.ShowGitStatusInBrowseToolbar;

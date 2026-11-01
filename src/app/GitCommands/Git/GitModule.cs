@@ -385,6 +385,8 @@ public sealed partial class GitModule : IGitModule
 
             lock (_gitCommonLock)
             {
+                _gitCommonDirectory ??= TryResolveGitCommonDirectoryFromFiles();
+
                 if (_gitCommonDirectory is null)
                 {
                     GitArgumentBuilder args = new("rev-parse") { "--git-common-dir" };
@@ -512,6 +514,11 @@ public sealed partial class GitModule : IGitModule
 
     public bool InTheMiddleOfConflictedMerge(bool throwOnErrorExit = true)
     {
+        if (TryGetCachedConflictedMerge() is bool cached)
+        {
+            return cached;
+        }
+
         GitArgumentBuilder args = new("ls-files")
         {
             "-z",
@@ -520,7 +527,7 @@ public sealed partial class GitModule : IGitModule
 
         // Do not report errors for commands called in the background
         ExecutionResult result = GitExecutable.Execute(args, throwOnErrorExit: throwOnErrorExit);
-        return result.ExitedSuccessfully && !string.IsNullOrEmpty(result.StandardOutput);
+        return CacheAndReturnConflictedMerge(result);
     }
 
     public bool HandleConflictSelectSide(string fileName, string side, out string errorMessage)
@@ -997,6 +1004,7 @@ public sealed partial class GitModule : IGitModule
         // This means that the WSL path is presented in WSL repos, not the Windows path (native to the app).
         string output = GitExecutable.GetOutput(args);
 
+        _gitCommonDirectory = null;
         WorkingDirGitDir = _executor.GetGitDirectory();
         return output;
     }

@@ -344,6 +344,58 @@ public class FormBrowseTests
     }
 
     [Test]
+    public void Stashes_should_be_visible_in_grid_and_left_panel_when_repository_has_stash()
+    {
+        using ReferenceRepository referenceRepository = new();
+        GitUICommands commands = new(GlobalServiceContainer.CreateDefaultMockServiceContainer(), referenceRepository.Module);
+
+        referenceRepository.CreateCommit("Commit1");
+        referenceRepository.Stash("Stash1");
+
+        bool showStashes = AppSettings.ShowStashes;
+        bool repoObjectsTreeShowStashes = AppSettings.RepoObjectsTreeShowStashes;
+
+        AppSettings.ShowStashes = true;
+        AppSettings.RepoObjectsTreeShowStashes = true;
+
+        RunFormTest(
+            form =>
+            {
+                try
+                {
+                    WaitForRevisionsToBeLoaded(form);
+
+                    // Verify stash is visible in revision grid
+                    form.GetTestAccessor().RevisionGrid.GetTestAccessor().VisibleRevisionCount.Should().BeGreaterThan(1);
+
+                    // Verify stash is visible in left panel
+                    UITest.ProcessUntil(
+                        "waiting for stash node in left panel",
+                        () =>
+                        {
+                            TreeNode? stashesRoot = form.GetTestAccessor().RepoObjectsTree.GetTestAccessor().TreeView.Nodes
+                                .Find(TranslatedStrings.Stashes, searchAllChildren: true)
+                                .FirstOrDefault();
+                            return stashesRoot is not null && stashesRoot.Nodes.Count > 0;
+                        });
+
+                    TreeNode? stashRootNode = form.GetTestAccessor().RepoObjectsTree.GetTestAccessor().TreeView.Nodes
+                        .Find(TranslatedStrings.Stashes, searchAllChildren: true)
+                        .FirstOrDefault();
+                    stashRootNode.Should().NotBeNull();
+                    stashRootNode!.Nodes.Count.Should().Be(1);
+                    stashRootNode.Nodes[0].Text.Should().Contain("Stash1");
+                }
+                finally
+                {
+                    AppSettings.ShowStashes = showStashes;
+                    AppSettings.RepoObjectsTreeShowStashes = repoObjectsTreeShowStashes;
+                }
+            },
+            commands);
+    }
+
+    [Test]
     public void SetWorkingDir_should_reload_commit_info_for_auto_selected_revision_after_repository_switch()
     {
         using (CommitInfoPanelTestSettingsScope.ForBrowseRepositorySwitch())
