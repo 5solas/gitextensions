@@ -463,6 +463,7 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
             _gitStatusMonitor?.Dispose();
             _windowsJumpListManager?.Dispose();
             _gpgInfoSequence.Dispose();
+            DisposeConsoleTab();
         }
 
         base.Dispose(disposing);
@@ -1455,23 +1456,24 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
 
     private void toolsToolStripMenuItem_SettingsChanged(object sender, Menus.SettingsChangedEventArgs e)
     {
-        HandleSettingsChanged(e.OldTranslation, e.OldCommitInfoPosition);
+        HandleSettingsChanged(e.OldTranslation, e.OldCommitInfoPosition, e.OldConsoleSettings);
     }
 
     private void OnShowSettingsClick(object sender, EventArgs e)
     {
         string translation = AppSettings.Translation;
         CommitInfoPosition commitInfoPosition = AppSettings.CommitInfoPosition;
+        ConsoleSettingsSnapshot consoleSettings = CaptureConsoleSettings();
 
         // Await plugin registration
         _loadOperations.JoinPendingOperations();
 
         UICommands.StartSettingsDialog(this);
 
-        HandleSettingsChanged(translation, commitInfoPosition);
+        HandleSettingsChanged(translation, commitInfoPosition, consoleSettings);
     }
 
-    private void HandleSettingsChanged(string oldTranslation, CommitInfoPosition oldCommitInfoPosition)
+    private void HandleSettingsChanged(string oldTranslation, CommitInfoPosition oldCommitInfoPosition, ConsoleSettingsSnapshot oldConsoleSettings)
     {
         Module?.InvalidateGitSettings();
 
@@ -1485,6 +1487,7 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
             LayoutRevisionInfo();
         }
 
+        ApplyConsoleSettingsIfChanged(oldConsoleSettings);
         LoadHotkeys(HotkeySettingsName);
         RevisionGrid.ReloadHotkeys();
         RevisionGrid.ReloadTranslation();
@@ -2760,33 +2763,11 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         _consoleTabPage.ImageKey = nameof(Images.Console);
 
         // Delay-create the terminal window when the tab is first selected
-        CommitInfoTabControl.Selecting += (sender, args) =>
+        if (!_consoleTabSelectingSubscribed)
         {
-            if (args.TabPage != _consoleTabPage)
-            {
-                return;
-            }
-
-            if (_terminal is null)
-            {
-                _terminal = _consoleEmulatorsRegistry.CreateShellRunner();
-                if (_terminal is null)
-                {
-                    return;
-                }
-
-                _terminal.Control.Dock = DockStyle.Fill;
-                _consoleTabPage!.Controls.Add(_terminal.Control);
-            }
-
-            if (_terminal.IsShellRunning)
-            {
-                _terminal.FocusTerminal();
-                return;
-            }
-
-            _terminal.StartShell(Module.WorkingDir);
-        };
+            CommitInfoTabControl.Selecting += CommitInfoTabControl_Selecting;
+            _consoleTabSelectingSubscribed = true;
+        }
     }
 
     public void ChangeTerminalActiveFolder(string path)
@@ -3090,6 +3071,11 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         public FilterToolBar ToolStripFilters => _form.ToolStripFilters;
         public CommitInfo.CommitInfo RevisionInfo => _form.RevisionInfo;
         public TabPage CommitInfoTabPage => _form.CommitInfoTabPage;
+        public IConsoleShellRunner? Terminal => _form._terminal;
+        public TabPage? ConsoleTabPage => _form._consoleTabPage;
+        public ConsoleSettingsSnapshot CaptureConsoleSettings() => FormBrowse.CaptureConsoleSettings();
+        public void HandleSettingsChanged(ConsoleSettingsSnapshot oldConsoleSettings) => _form.HandleSettingsChanged(AppSettings.Translation, AppSettings.CommitInfoPosition, oldConsoleSettings);
+        public void ResetTerminalTab(bool oldShowTab = true) => _form.ResetTerminalTab(oldShowTab);
 
         public void RefreshRevisions() => _form.RefreshRevisions();
         public void SetWorkingDir(string? path) => _form.SetWorkingDir(path);
