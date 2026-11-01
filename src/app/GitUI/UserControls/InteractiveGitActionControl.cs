@@ -79,6 +79,12 @@ public partial class InteractiveGitActionControl : GitModuleControl
             return;
         }
 
+        if (checkForConflicts && !IsConflictStateCached())
+        {
+            ScheduleBackgroundConflictCheck();
+            checkForConflicts = false;
+        }
+
         bool hasConflicts;
         try
         {
@@ -115,6 +121,8 @@ public partial class InteractiveGitActionControl : GitModuleControl
 
     private void SetGitAction(GitAction action, bool hasConflicts)
     {
+        hasConflicts = PreserveConflictState(action, hasConflicts);
+
         if ((action == _action) && (hasConflicts == _hasConflicts))
         {
             // nothing to do

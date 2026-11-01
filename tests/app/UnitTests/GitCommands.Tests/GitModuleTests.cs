@@ -3,6 +3,7 @@ using System.Text;
 using CommonTestUtils;
 using GitCommands;
 using GitCommands.Git;
+using GitCommands.Logging;
 using GitExtensions.Extensibility;
 using GitExtensions.Extensibility.Git;
 using GitExtUtils;
@@ -119,7 +120,7 @@ public sealed partial class GitModuleTests
     public void ParseGitBlame()
     {
         using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-        using IDisposable configList = _executable.StageOutput("config list --includes --null", null!);
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", null!);
         GitVersion.ResetVersion();
 
         string path = Path.Combine(TestContext.CurrentContext.TestDirectory, @"TestData/README.blame");
@@ -166,7 +167,7 @@ public sealed partial class GitModuleTests
     public void FetchCmd()
     {
         using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-        using IDisposable configList = _executable.StageOutput("config list --includes --null", null!);
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", null!);
         GitVersion.ResetVersion();
 
         using (_executable.StageOutput("rev-parse --quiet --verify \"refs/heads/remotebranch~0\"", null!))
@@ -251,6 +252,32 @@ public sealed partial class GitModuleTests
         refs[3].IsRemote.Should().BeFalse();
         refs[3].IsTag.Should().BeTrue();
         refs[3].Module.Should().BeSameAs(_gitModule);
+    }
+
+    [Test]
+    public void ParseRefs_should_parse_taggerdate_when_present()
+    {
+        const string refList =
+            "69a7c7a40230346778e7eebed809773a6bc45268 refs/heads/master\0\n" +
+            "366dfba1abf6cb98d2934455713f3d190df2ba34 refs/tags/v1.0^{}\01700000000\n" +
+            "5303e7114f1896c639dea0231fac522752cc44a2 refs/tags/lightweight\0\n" +
+            "1234567890123456789012345678901234567890 refs/tags/invalid\0not-a-number\n";
+
+        IReadOnlyList<IGitRef> refs = _gitModule.ParseRefs(refList);
+
+        refs.Count.Should().Be(4);
+
+        refs[0].CompleteName.Should().Be("refs/heads/master");
+        ((GitRef)refs[0]).TaggerDate.Should().BeNull();
+
+        refs[1].CompleteName.Should().Be("refs/tags/v1.0^{}");
+        ((GitRef)refs[1]).TaggerDate.Should().Be(DateTimeOffset.FromUnixTimeSeconds(1700000000));
+
+        refs[2].CompleteName.Should().Be("refs/tags/lightweight");
+        ((GitRef)refs[2]).TaggerDate.Should().BeNull();
+
+        refs[3].CompleteName.Should().Be("refs/tags/invalid");
+        ((GitRef)refs[3]).TaggerDate.Should().BeNull();
     }
 
     [TestCase("branch -a --contains",
@@ -711,11 +738,11 @@ public sealed partial class GitModuleTests
         using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
         GitVersion.ResetVersion();
 
-        using IDisposable configListBeforeUnset = _executable.StageOutput("config list --includes --null", "http.proxy\nhttp://proxy:8080\0");
+        using IDisposable configListBeforeUnset = _executable.StageOutput("config list --show-scope --includes --null", "global\0http.proxy\nhttp://proxy:8080\0");
         _gitModule.GetEffectiveSetting("http.proxy").Should().Be("http://proxy:8080");
 
         using IDisposable unset = _executable.StageOutput("config unset --global -- \"http.proxy\"", "", exitCode);
-        using IDisposable configListAfterUnset = _executable.StageOutput("config list --includes --null", "");
+        using IDisposable configListAfterUnset = _executable.StageOutput("config list --show-scope --includes --null", "");
         _gitModule.SetGitSetting(GitSettingLevel.Global, "http.proxy", value: null);
 
         _gitModule.GetEffectiveSetting("http.proxy").Should().BeEmpty();
@@ -801,5 +828,133 @@ public sealed partial class GitModuleTests
         executorAccessor.GitCommandRunner = new GitCommandRunner(executable, () => GitModule.SystemEncoding);
 
         return module;
+    }
+
+    [Test]
+    public void InTheMiddleOfConflictedMerge_should_return_false_and_cache_when_no_conflicts()
+    {
+        using GitModuleTestHelper helper = new();
+        helper.Module.SetSetting("core.editor", "true");
+        helper.Module.SetSetting("commit.gpgsign", "false");
+        helper.CreateFile(helper.Module.WorkingDir, "file.txt", "content");
+        helper.Module.GitExecutable.Execute("add file.txt");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -m \"Initial commit\"");
+
+        CommandLog.Clear();
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeFalse();
+        CommandLog.Commands.Count(c => c.Arguments.Contains("ls-files")).Should().Be(1);
+
+        CommandLog.Clear();
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeFalse();
+        CommandLog.Commands.Where(c => c.Arguments.Contains("ls-files")).Should().BeEmpty();
+    }
+
+    [Test]
+    public void InTheMiddleOfConflictedMerge_should_detect_merge_conflict_and_cache()
+    {
+        using GitModuleTestHelper helper = new();
+        helper.Module.SetSetting("core.editor", "true");
+        helper.Module.SetSetting("merge.tool", "false");
+        helper.Module.SetSetting("mergetool.prompt", "false");
+        helper.Module.SetSetting("commit.gpgsign", "false");
+
+        string filePath = Path.Combine(helper.Module.WorkingDir, "file.txt");
+        File.WriteAllText(filePath, "initial\n");
+        helper.Module.GitExecutable.Execute("add file.txt");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -m \"Initial commit\"");
+
+        string mainBranch = helper.Module.GetSelectedBranch();
+
+        helper.Module.GitExecutable.Execute("branch feature");
+        File.WriteAllText(filePath, "main change\n");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -am \"Main change\"");
+
+        helper.Module.GitExecutable.Execute("checkout feature");
+        File.WriteAllText(filePath, "feature change\n");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -am \"Feature change\"");
+
+        helper.Module.GitExecutable.Execute($"-c core.editor=true merge --no-edit {mainBranch}", throwOnErrorExit: false);
+
+        CommandLog.Clear();
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeTrue();
+        CommandLog.Commands.Count(c => c.Arguments.Contains("ls-files")).Should().Be(1);
+
+        CommandLog.Clear();
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeTrue();
+        CommandLog.Commands.Where(c => c.Arguments.Contains("ls-files")).Should().BeEmpty();
+    }
+
+    [Test]
+    public void InTheMiddleOfConflictedMerge_should_detect_stash_apply_conflict_without_merge_head()
+    {
+        using GitModuleTestHelper helper = new();
+        helper.Module.SetSetting("core.editor", "true");
+        helper.Module.SetSetting("merge.tool", "false");
+        helper.Module.SetSetting("mergetool.prompt", "false");
+        helper.Module.SetSetting("commit.gpgsign", "false");
+
+        string filePath = Path.Combine(helper.Module.WorkingDir, "file.txt");
+        File.WriteAllText(filePath, "initial\n");
+        helper.Module.GitExecutable.Execute("add file.txt");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -m \"Initial commit\"");
+
+        File.WriteAllText(filePath, "stash change\n");
+        helper.Module.GitExecutable.Execute("stash push -m \"stash\"");
+
+        File.WriteAllText(filePath, "commit change\n");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -am \"Commit change\"");
+
+        helper.Module.GitExecutable.Execute("-c core.editor=true stash apply", throwOnErrorExit: false);
+
+        File.Exists(Path.Combine(helper.Module.WorkingDirGitDir, "MERGE_HEAD")).Should().BeFalse();
+
+        CommandLog.Clear();
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeTrue();
+        CommandLog.Commands.Count(c => c.Arguments.Contains("ls-files")).Should().Be(1);
+
+        CommandLog.Clear();
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeTrue();
+        CommandLog.Commands.Where(c => c.Arguments.Contains("ls-files")).Should().BeEmpty();
+    }
+
+    [Test]
+    public void InTheMiddleOfConflictedMerge_should_return_false_after_git_add_resolves_conflict()
+    {
+        using GitModuleTestHelper helper = new();
+        helper.Module.SetSetting("core.editor", "true");
+        helper.Module.SetSetting("merge.tool", "false");
+        helper.Module.SetSetting("mergetool.prompt", "false");
+        helper.Module.SetSetting("commit.gpgsign", "false");
+
+        string filePath = Path.Combine(helper.Module.WorkingDir, "file.txt");
+        File.WriteAllText(filePath, "initial\n");
+        helper.Module.GitExecutable.Execute("add file.txt");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -m \"Initial commit\"");
+
+        string mainBranch = helper.Module.GetSelectedBranch();
+
+        helper.Module.GitExecutable.Execute("branch feature");
+        File.WriteAllText(filePath, "main change\n");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -am \"Main change\"");
+
+        helper.Module.GitExecutable.Execute("checkout feature");
+        File.WriteAllText(filePath, "feature change\n");
+        helper.Module.GitExecutable.Execute("-c core.editor=true commit --no-gpg-sign -am \"Feature change\"");
+
+        helper.Module.GitExecutable.Execute($"-c core.editor=true merge --no-edit {mainBranch}", throwOnErrorExit: false);
+
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeTrue();
+
+        // Resolve conflict
+        File.WriteAllText(filePath, "resolved\n");
+        helper.Module.GitExecutable.Execute("add file.txt");
+
+        CommandLog.Clear();
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeFalse();
+        CommandLog.Commands.Count(c => c.Arguments.Contains("ls-files")).Should().Be(1);
+
+        CommandLog.Clear();
+        helper.Module.InTheMiddleOfConflictedMerge().Should().BeFalse();
+        CommandLog.Commands.Where(c => c.Arguments.Contains("ls-files")).Should().BeEmpty();
     }
 }

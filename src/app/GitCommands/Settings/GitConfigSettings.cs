@@ -10,7 +10,7 @@ namespace GitCommands.Settings;
 ///  Provides read/write access to git config settings of a specific scope (by running "git config").
 /// </summary>
 [DebuggerDisplay("{" + nameof(DebuggerDisplay) + ",nq}")]
-public sealed class GitConfigSettings : GitConfigSettingsBase, IGitConfigSettingsGetter, IPersistentConfigValueStore
+public sealed partial class GitConfigSettings : GitConfigSettingsBase, IGitConfigSettingsGetter, IPersistentConfigValueStore
 {
     private readonly Dictionary<string, string?> _modifiedSettings = [];
     private readonly Dictionary<string, List<string>> _multiValueSettings = [];
@@ -21,8 +21,8 @@ public sealed class GitConfigSettings : GitConfigSettingsBase, IGitConfigSetting
     /// <param name="gitExecutable">The <see cref="IGitExecutor.GitExecutable"/> for the repo of interest.</param>
     /// <param name="gitSettingLevel">The scope (excluding <see cref="GitSettingLevel.Effective"/>) of the git config settings.</param>
     /// <exception cref="ArgumentOutOfRangeException"></exception>
-    public GitConfigSettings(IExecutable gitExecutable, GitSettingLevel gitSettingLevel)
-        : base(gitExecutable, gitSettingLevel)
+    public GitConfigSettings(IExecutable gitExecutable, GitSettingLevel gitSettingLevel, GitConfigSnapshotProvider? snapshotProvider = null)
+        : base(gitExecutable, gitSettingLevel, snapshotProvider)
     {
         ArgumentOutOfRangeException.ThrowIfEqual(gitSettingLevel == GitSettingLevel.Effective, true, $"Use read-only {nameof(EffectiveGitConfigSettings)} instance instead.");
     }
@@ -35,6 +35,16 @@ public sealed class GitConfigSettings : GitConfigSettingsBase, IGitConfigSetting
 
     public IEnumerable<(string Setting, string Value)> GetAllValues()
     {
+        if (TryGetAllValuesFromSnapshot(out IEnumerable<(string Setting, string Value)>? snapshotValues))
+        {
+            foreach ((string Setting, string Value) item in snapshotValues)
+            {
+                yield return item;
+            }
+
+            yield break;
+        }
+
         Update();
 
         foreach (KeyValuePair<string, string?> modified in _modifiedSettings)
@@ -70,6 +80,11 @@ public sealed class GitConfigSettings : GitConfigSettingsBase, IGitConfigSetting
             return value;
         }
 
+        if (TryGetLocalValueFromSnapshot(name, out string? snapshotValue))
+        {
+            return snapshotValue;
+        }
+
         Update();
         if (UniqueValueSettings.TryGetValue(name, out value))
         {
@@ -85,6 +100,11 @@ public sealed class GitConfigSettings : GitConfigSettingsBase, IGitConfigSetting
     public IReadOnlyList<string> GetValues(string name)
     {
         name = NormalizeSettingName(name);
+        if (TryGetLocalValuesFromSnapshot(name, out IReadOnlyList<string>? snapshotValues))
+        {
+            return snapshotValues;
+        }
+
         Update();
         return _multiValueSettings.TryGetValue(name, out List<string>? values)
             ? values
@@ -110,6 +130,7 @@ public sealed class GitConfigSettings : GitConfigSettingsBase, IGitConfigSetting
         }
 
         _modifiedSettings.Clear();
+        SnapshotProvider?.Invalidate();
     }
 
     public void SetValue(string name, string? value)
@@ -122,6 +143,11 @@ public sealed class GitConfigSettings : GitConfigSettingsBase, IGitConfigSetting
         }
 
         if (value == GetValue(name))
+        {
+            return;
+        }
+
+        if (TrySetValueFromSnapshot(name, value))
         {
             return;
         }
