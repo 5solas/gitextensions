@@ -95,13 +95,16 @@ pwsh eng/hj/Sync-Upstream.ps1 -DryRun -SkipBuild -SkipTests
 
 # 3. 모든 검증 통과 후 원격(origin)에 푸시까지 완료
 pwsh eng/hj/Sync-Upstream.ps1 -Push
+
+# 4. 특정 토픽 파일 지정 (기본값은 hj/infra 브랜치의 eng/hj/topics.txt)
+pwsh eng/hj/Sync-Upstream.ps1 -Topics <path>
 ```
 
 스크립트는 내부적으로 다음 과정을 수행합니다:
 1. 작업 트리가 깨끗한지 확인하고 다른 워크트리와의 브랜치 충돌을 사전 차단하며, 브랜치 전환 시 스크립트 잠금 및 유실을 방지하기 위해 임시 폴더로 자체 복사 후 재실행(re-exec)합니다. 시작 전 모든 대상 브랜치(master, 토픽들, hj/main)의 SHA를 `refs/hj-sync-backup/<timestamp>/<branch>`에 백업합니다.
 2. `git fetch upstream --prune --tags` 및 `git fetch origin --prune`를 실행합니다.
 3. `master`를 `upstream/master`로 fast-forward 동기화합니다 (직접 커밋이 발견되어 ff가 불가능하면 즉시 중단).
-4. `eng/hj/topics.txt`에 명시된 토픽 브랜치들을 순서대로 `master` 위로 rebase합니다. 업스트림에 이미 채택되어 내용이 같아진 커밋은 건너뛰며, rebase 완료 후 조상 여부 및 커밋 수 일관성을 자동 검증합니다.
+4. 토픽 목록 브랜치들을 순서대로 `master` 위로 rebase합니다(`-Topics` 미지정 시 `hj/infra` 브랜치의 `eng/hj/topics.txt`에서 읽으며, 부재 시 작업 트리 파일로 폴백). 업스트림에 이미 채택되어 내용이 같아진 커밋은 건너뛰며, rebase 완료 후 조상 여부 및 커밋 수 일관성을 자동 검증합니다.
 5. `hj/main`을 안전하게 재생성(`git checkout -B hj/main master`, `git reset --hard` 미사용)한 후 각 토픽 브랜치를 `--no-ff`로 머지하고, 첫 부모 체인(first-parent)에 토픽 머지 커밋이 올바르게 존재하는지 검증합니다.
 6. 솔루션 빌드(`dotnet build /v:q`) 및 주요 회귀 테스트를 순차 실행합니다.
 7. 변경 요약(각 토픽 전/후 SHA, 커밋 수, 건너뛴 커밋 목록, `hj/main` SHA, 복구용 `git branch -f` 명령어)을 출력합니다.
