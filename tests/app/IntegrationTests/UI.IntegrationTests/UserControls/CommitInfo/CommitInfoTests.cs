@@ -257,8 +257,6 @@ public class CommitInfoTests
     {
         string hash = "a48da1aba59a65b2a7f0df7e3512817caf16819f";
 
-        _gitExecutable.StageOutput("rev-parse --git-common-dir", ".git");
-
         // Generate branches: branch01...branch15
         _gitExecutable.StageOutput($"branch --contains {hash}", string.Join('\n', Enumerable.Range(1, 15).Select(i => $"branch{i:00}")));
 
@@ -296,8 +294,6 @@ public class CommitInfoTests
         string hash = "a48da1aba59a65b2a7f0df7e3512817caf16819f";
         string hashInBody = "a48da1aba59a65b2a7f0df7e3512817caf16819a";
         string hashLink = $"gitext://gotocommit/{hashInBody}";
-
-        _gitExecutable.StageOutput("rev-parse --git-common-dir", ".git");
 
         // Generate branches: branch01...branch15
         _gitExecutable.StageOutput($"branch --contains {hash}", string.Join('\n', Enumerable.Range(1, 15).Select(i => $"branch{i:00}")));
@@ -344,8 +340,6 @@ public class CommitInfoTests
     {
         string hash = "a48da1aba59a65b2a7f0df7e3512817caf16819f";
 
-        _gitExecutable.StageOutput("rev-parse --git-common-dir", ".git");
-
         // Generate branches: branch01...branch15
         _gitExecutable.StageOutput($"branch --contains {hash}", string.Join('\n', Enumerable.Range(1, 15).Select(i => $"branch{i:00}")));
 
@@ -384,8 +378,6 @@ public class CommitInfoTests
     public void ReloadCommitInfo_should_handle_ShowAll_tags_correctly()
     {
         string hash = "a48da1aba59a65b2a7f0df7e3512817caf16819f";
-
-        _gitExecutable.StageOutput("rev-parse --git-common-dir", ".git");
 
         // Generate branches: branch01...branch15
         _gitExecutable.StageOutput($"branch --contains {hash}", string.Join('\n', Enumerable.Range(1, 15).Select(i => $"branch{i:00}")));
