@@ -2,16 +2,21 @@
 .SYNOPSIS
     Syncs Git Extensions topic branches and hj/main with upstream/master using patch-stack rebase.
 .DESCRIPTION
-    1. Validates working tree state and records current branch.
-    2. Fetches upstream and origin remotes.
-    3. Fast-forwards master to upstream/master.
-    4. Rebases each topic branch from topics.txt onto master (tracks skipped commits, handles rerere).
-    5. Recreates hj/main from master and merges each topic sequentially (--no-ff).
-    6. Optionally runs dotnet build (/v:q).
-    7. Optionally runs regression tests sequentially with trx logging and timeout monitoring.
-    8. Summarizes changes (SHAs, commit counts, skipped commits, build/test results).
-    9. Optionally pushes branches to origin (--force-with-lease for topics and hj/main).
-   10. Restores original branch.
+    1. Validates working tree state, checks for worktree conflicts, and records original branch.
+    2. Self-copies and re-executes from a temporary location to prevent file locking or modifications
+       to the running script while switching and rebasing branches.
+    3. Saves pre-sync backup refs under refs/hj-sync-backup/<timestamp>/<branch> for safe recovery.
+    4. Fetches upstream and origin remotes.
+    5. Fast-forwards master to upstream/master.
+    6. Rebases each topic branch from topics.txt onto master (tracks skipped commits, handles rerere,
+       verifies post-rebase ancestor and commit count consistency).
+    7. Safely recreates hj/main using git checkout -B hj/main master without git reset --hard,
+       merges each topic sequentially (--no-ff), and verifies integration spine ancestry.
+    8. Optionally runs dotnet build (/v:q).
+    9. Optionally runs regression tests sequentially with trx logging and timeout monitoring.
+   10. Summarizes changes (SHAs, commit counts, skipped commits, build/test results, backup recovery commands).
+   11. Optionally pushes branches to origin (--force-with-lease for topics and hj/main).
+   12. Restores original branch.
 .PARAMETER Push
     Pushes master, topic branches, and hj/main to origin upon success.
 .PARAMETER SkipTests
@@ -38,6 +43,43 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# -----------------------------------------------------------------------------
+# Re-exec from a temporary directory copy so that branch checkouts and rebases
+# do not overwrite, delete, or lock the executing script file itself.
+# -----------------------------------------------------------------------------
+if (-not $env:HJ_SYNC_REEXEC) {
+    $scriptFile = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    if ($scriptFile -and (Test-Path -Path $scriptFile -PathType Leaf)) {
+        $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("hj-sync-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+        $tempScript = Join-Path $tempDir ([System.IO.Path]::GetFileName($scriptFile))
+        Copy-Item -Path $scriptFile -Destination $tempScript -Force
+
+        $forwardArgs = [System.Collections.Generic.List[string]]::new()
+        foreach ($key in $PSBoundParameters.Keys) {
+            $val = $PSBoundParameters[$key]
+            if ($val -is [System.Management.Automation.SwitchParameter]) {
+                if ($val.IsPresent) {
+                    $forwardArgs.Add("-$key")
+                }
+            } else {
+                $forwardArgs.Add("-$key")
+                $forwardArgs.Add("$val")
+            }
+        }
+
+        $env:HJ_SYNC_REEXEC = "1"
+        try {
+            & pwsh -NoProfile -File $tempScript @forwardArgs
+            $exitCode = $LASTEXITCODE
+            exit $exitCode
+        } finally {
+            Remove-Item env:HJ_SYNC_REEXEC -ErrorAction SilentlyContinue
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 
 # Resolve repository root
 $repoRoot = (git rev-parse --show-toplevel 2>$null)
@@ -77,7 +119,75 @@ function Test-ConflictMarkersPresent([string]$FilePath) {
     return [bool]$match
 }
 
-function Resolve-RerereOrHaltRebase([string]$TopicName, [string]$OntoRef) {
+function Get-CheckedOutWorktrees {
+    $result = @{}
+    $lines = @(git worktree list --porcelain 2>$null)
+    $currentPath = $null
+    foreach ($line in $lines) {
+        if ($line -match '^worktree\s+(.+)$') {
+            $currentPath = $Matches[1].Trim()
+        } elseif ($line -match '^branch\s+refs/heads/(.+)$') {
+            $branch = $Matches[1].Trim()
+            if ($currentPath) {
+                $normPath = [System.IO.Path]::GetFullPath($currentPath)
+                $result[$branch] = $normPath
+            }
+        }
+    }
+    return $result
+}
+
+function Assert-NoExternalWorktreeConflicts([string[]]$BranchesToCheck, [string]$RepoRootPath) {
+    $worktrees = Get-CheckedOutWorktrees
+    $currentRootNorm = [System.IO.Path]::GetFullPath($RepoRootPath)
+
+    foreach ($branch in $BranchesToCheck) {
+        if ($worktrees.ContainsKey($branch)) {
+            $wtPath = $worktrees[$branch]
+            if ($wtPath -ne $currentRootNorm) {
+                Write-Error "Cannot proceed: branch '$branch' is currently checked out in another worktree at '$wtPath'. Please switch that worktree to a different branch before running sync."
+                exit 1
+            }
+        }
+    }
+}
+
+function Create-BackupRefs([string[]]$Branches, [string]$Timestamp) {
+    $created = [System.Collections.Generic.Dictionary[string, string]]::new()
+    foreach ($b in $Branches) {
+        $sha = (git rev-parse --verify "refs/heads/$b" 2>$null)
+        if ($sha) {
+            $sha = $sha.Trim()
+            $refName = "refs/hj-sync-backup/$Timestamp/$b"
+            & git update-ref $refName $sha
+            if ($LASTEXITCODE -eq 0) {
+                $created[$b] = $refName
+            } else {
+                Write-Error "Failed to create backup ref '$refName' for branch '$b'."
+                exit 1
+            }
+        }
+    }
+    return $created
+}
+
+function Write-BackupRecoveryCommands([System.Collections.Generic.Dictionary[string, string]]$Refs, [string]$Timestamp) {
+    if (-not $Refs -or $Refs.Count -eq 0) { return }
+    Write-Host ""
+    Write-Host "Backup references created under 'refs/hj-sync-backup/$Timestamp/':" -ForegroundColor Cyan
+    Write-Host "To revert branches to their pre-sync state, execute:" -ForegroundColor Cyan
+    foreach ($kvp in $Refs.GetEnumerator()) {
+        Write-Host "  git branch -f $($kvp.Key) $($kvp.Value)" -ForegroundColor Yellow
+    }
+    Write-Host ""
+}
+
+function Resolve-RerereOrHaltRebase(
+    [string]$TopicName,
+    [string]$OntoRef,
+    [System.Collections.Generic.Dictionary[string, string]]$BackupRefs,
+    [string]$BackupTimestamp
+) {
     $gitDir = (git rev-parse --git-dir).Trim()
 
     while ($true) {
@@ -124,11 +234,16 @@ function Resolve-RerereOrHaltRebase([string]$TopicName, [string]$OntoRef) {
         Write-Host "  3. Continue rebase:     git rebase --continue"
         Write-Host "  4. Re-run sync:         pwsh eng/hj/Sync-Upstream.ps1"
         Write-Host ""
+        Write-BackupRecoveryCommands -Refs $BackupRefs -Timestamp $BackupTimestamp
         exit 2
     }
 }
 
-function Resolve-RerereOrHaltMerge([string]$TopicName) {
+function Resolve-RerereOrHaltMerge(
+    [string]$TopicName,
+    [System.Collections.Generic.Dictionary[string, string]]$BackupRefs,
+    [string]$BackupTimestamp
+) {
     $unmergedFiles = @(git diff --name-only --diff-filter=U 2>$null | Where-Object { $_.Trim() })
     $rerereStatus = @(git rerere status 2>$null | Where-Object { $_.Trim() })
 
@@ -162,6 +277,7 @@ function Resolve-RerereOrHaltMerge([string]$TopicName) {
     Write-Host "  3. Commit merge:        git commit --no-edit"
     Write-Host "  4. Re-run sync:         pwsh eng/hj/Sync-Upstream.ps1"
     Write-Host ""
+    Write-BackupRecoveryCommands -Refs $BackupRefs -Timestamp $BackupTimestamp
     exit 2
 }
 
@@ -170,8 +286,7 @@ function Resolve-RerereOrHaltMerge([string]$TopicName) {
 # -----------------------------------------------------------------------------
 
 # The script checks out and rebases branches in this worktree, so it must start clean.
-# It deliberately does not stash: the stash is shared by every worktree of the repository,
-# and popping it could restore another worktree's changes here.
+# Stash is deliberately avoided because stash is shared across worktrees.
 $didStash = $false
 $statusOutput = @(git status --porcelain 2>$null | Where-Object { $_.Trim() })
 $trackedModifications = @($statusOutput | Where-Object { -not $_.StartsWith('??') })
@@ -181,12 +296,34 @@ if ($trackedModifications.Count -gt 0) {
     exit 1
 }
 
-$originalBranch = (git branch --show-current 2>$null).Trim()
+# Verify no branches to be altered are checked out in other worktrees
+$branchesToValidate = [System.Collections.Generic.List[string]]::new()
+$branchesToValidate.Add("master")
+foreach ($t in $topicLines) {
+    if (-not $branchesToValidate.Contains($t)) {
+        $branchesToValidate.Add($t)
+    }
+}
+if (-not $DryRun) {
+    if (-not $branchesToValidate.Contains("hj/main")) {
+        $branchesToValidate.Add("hj/main")
+    }
+}
+Assert-NoExternalWorktreeConflicts -BranchesToCheck $branchesToValidate.ToArray() -RepoRootPath $repoRoot
+
+$originalBranch = (git branch --show-current 2>$null)
+if ($originalBranch) {
+    $originalBranch = $originalBranch.Trim()
+}
 if (-not $originalBranch) {
     $originalBranch = (git rev-parse HEAD 2>$null).Trim()
 }
 
 $createdTempBranches = [System.Collections.Generic.List[string]]::new()
+
+# Create safety backup refs before altering any branches
+$backupTimestamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
+$backupRefs = Create-BackupRefs -Branches $branchesToValidate.ToArray() -Timestamp $backupTimestamp
 
 try {
     # -------------------------------------------------------------------------
@@ -196,11 +333,13 @@ try {
     & git fetch upstream --prune --tags
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to fetch upstream remote."
+        Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
         exit 1
     }
     & git fetch origin --prune
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to fetch origin remote."
+        Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
         exit 1
     }
 
@@ -214,6 +353,7 @@ try {
     & git merge-base --is-ancestor master upstream/master
     if ($LASTEXITCODE -ne 0) {
         Write-Error "master cannot be fast-forwarded to upstream/master. Direct commits may exist on master."
+        Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
         exit 1
     }
 
@@ -229,12 +369,14 @@ try {
             & git merge --ff-only upstream/master
             if ($LASTEXITCODE -ne 0) {
                 Write-Error "Failed to fast-forward checked out master branch."
+                Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
                 exit 1
             }
         } else {
             & git branch -f master upstream/master
             if ($LASTEXITCODE -ne 0) {
                 Write-Error "Failed to update master branch pointer."
+                Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
                 exit 1
             }
         }
@@ -284,22 +426,49 @@ try {
             & git checkout $targetBranch
             if ($LASTEXITCODE -ne 0) {
                 Write-Error "Failed to checkout temporary test branch '$targetBranch'."
+                Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
                 exit 1
             }
         }
 
         # Perform rebase onto master / target upstream
         & git rebase $rebaseOntoBase $targetBranch
-        if ($LASTEXITCODE -ne 0) {
-            # Handle conflicts or rerere
-            Resolve-RerereOrHaltRebase -TopicName $targetBranch -OntoRef $rebaseOntoBase
+        $rebaseExitCode = $LASTEXITCODE
+        if ($rebaseExitCode -ne 0) {
+            $gitDir = (git rev-parse --git-dir).Trim()
+            $inRebase = (Test-Path (Join-Path $gitDir "rebase-merge")) -or (Test-Path (Join-Path $gitDir "rebase-apply"))
+            if ($inRebase) {
+                Resolve-RerereOrHaltRebase -TopicName $targetBranch -OntoRef $rebaseOntoBase -BackupRefs $backupRefs -BackupTimestamp $backupTimestamp
+            } else {
+                Write-Host ""
+                Write-Host "ERROR: git rebase $rebaseOntoBase $targetBranch failed (exit code $rebaseExitCode) without entering rebase state." -ForegroundColor Red
+                Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+                exit 1
+            }
         }
 
         $afterSha = (git rev-parse $targetBranch 2>$null).Trim()
         $afterCount = [int](git rev-list --count "$rebaseOntoBase..$targetBranch" 2>$null).Trim()
 
+        # Step D/E Verification (Requirement 3b):
+        # 1. master must be an ancestor of topic after rebase
+        & git merge-base --is-ancestor $rebaseOntoBase $targetBranch
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Rebase verification failed: $rebaseOntoBase is not an ancestor of '$targetBranch' after rebase."
+            Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+            exit 1
+        }
+
+        # 2. Commit count check: afterCount must equal beforeCount - skippedCommits.Count
+        $expectedCount = $beforeCount - $skippedCommits.Count
+        if ($afterCount -ne $expectedCount) {
+            Write-Error "Rebase verification failed for '$topic': expected $expectedCount commit(s) ($beforeCount before minus $($skippedCommits.Count) upstream-adopted), but found $afterCount commit(s)."
+            Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+            exit 1
+        }
+
         # Check if topic is now empty (identical to master / upstream)
-        $isAdopted = ($afterSha -eq $upstreamMasterSha)
+        $isAdopted = ($afterCount -eq 0 -or $afterSha -eq $upstreamMasterSha)
         if ($isAdopted) {
             Write-Warning "Topic '$topic' is fully adopted upstream - consider removing it from $Topics"
         }
@@ -308,7 +477,15 @@ try {
         if ($isAdopted) {
             $topicStatus = "Adopted (Empty)"
         } elseif ($beforeSha -eq $afterSha) {
-            $topicStatus = "Up to date (변경 없음)"
+            # Double check: SHA is unchanged only if it was already up-to-date with rebaseOntoBase
+            & git merge-base --is-ancestor $rebaseOntoBase $beforeSha
+            if ($LASTEXITCODE -eq 0) {
+                $topicStatus = "Up to date (변경 없음)"
+            } else {
+                Write-Error "Rebase anomaly detected for '$topic': SHA unchanged ($beforeSha) but topic was not an ancestor of $rebaseOntoBase."
+                Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+                exit 1
+            }
         }
 
         $topicResults.Add([PSCustomObject]@{
@@ -333,21 +510,24 @@ try {
     $mainBase = if ($DryRun) { $upstreamMasterSha } else { "master" }
 
     if ($DryRun) {
-        & git branch -f $mainBranch $mainBase
         $createdTempBranches.Add($mainBranch)
-    } else {
-        # Check if hj/main is checked out elsewhere or locally
-        if ($originalBranch -eq 'hj/main') {
-            & git reset --hard master
-        } else {
-            & git branch -f $mainBranch master
+        & git checkout -B $mainBranch $mainBase
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to checkout temporary integration branch '$mainBranch'."
+            Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+            exit 1
         }
-    }
+    } else {
+        # Check if hj/main is checked out in another worktree
+        Assert-NoExternalWorktreeConflicts -BranchesToCheck @("hj/main") -RepoRootPath $repoRoot
 
-    & git checkout $mainBranch
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to checkout $mainBranch."
-        exit 1
+        # Safe recreation: use checkout -B without touching other branches or using reset --hard
+        & git checkout -B $mainBranch master
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to checkout and recreate $mainBranch from master."
+            Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+            exit 1
+        }
     }
 
     foreach ($tr in $topicResults) {
@@ -359,11 +539,55 @@ try {
         Write-Host "    Merging '$($tr.TargetBranch)' into $mainBranch (--no-ff)..." -ForegroundColor White
         & git merge --no-ff --no-edit $tr.TargetBranch
         if ($LASTEXITCODE -ne 0) {
-            Resolve-RerereOrHaltMerge -TopicName $tr.TargetBranch
+            Resolve-RerereOrHaltMerge -TopicName $tr.TargetBranch -BackupRefs $backupRefs -BackupTimestamp $backupTimestamp
         }
     }
 
     $newHjMainSha = (git rev-parse $mainBranch 2>$null).Trim()
+
+    # Step F Verification (Requirement 3c):
+    # 1. All topic branches must be ancestors of hj/main
+    foreach ($tr in $topicResults) {
+        if ($tr.IsFullyAdopted) {
+            continue
+        }
+        & git merge-base --is-ancestor $tr.TargetBranch $mainBranch
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Integration branch verification failed: topic '$($tr.Topic)' is not an ancestor of $mainBranch."
+            Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+            exit 1
+        }
+    }
+
+    # 2. For every topic with unique commits (master..topic count > 0), a merge commit must exist in hj/main's first-parent chain
+    $firstParentMerges = @(git log --first-parent --merges --format="%H %P" "$mainBase..$mainBranch" 2>$null)
+    $secondParents = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($mLine in $firstParentMerges) {
+        $parts = $mLine.Trim() -split '\s+'
+        if ($parts.Count -ge 3) {
+            [void]$secondParents.Add($parts[2])
+        }
+    }
+
+    foreach ($tr in $topicResults) {
+        if ($tr.IsFullyAdopted -or $tr.AfterCommitCount -eq 0) {
+            continue
+        }
+        $targetTip = (git rev-parse $tr.TargetBranch 2>$null).Trim()
+        $found = $false
+        foreach ($sp in $secondParents) {
+            & git merge-base --is-ancestor $targetTip $sp
+            if ($LASTEXITCODE -eq 0) {
+                $found = $true
+                break
+            }
+        }
+        if (-not $found) {
+            Write-Error "Integration branch verification failed: topic '$($tr.Topic)' has unique commits ($($tr.AfterCommitCount)) but no merge commit was found on the first-parent spine of $mainBranch."
+            Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+            exit 1
+        }
+    }
 
     # -------------------------------------------------------------------------
     # Step G: Build Verification
@@ -554,6 +778,8 @@ try {
     Write-Host "  New SHA      : $newHjMainSha"
     Write-Host ""
 
+    Write-BackupRecoveryCommands -Refs $backupRefs -Timestamp $backupTimestamp
+
     if (-not $SkipBuild) {
         Write-Host "Build: Passed" -ForegroundColor Green
     }
@@ -633,8 +859,9 @@ try {
         $inMerge = Test-Path (Join-Path $gitDir "MERGE_HEAD")
 
         if (-not $inRebase -and -not $inMerge) {
-            $curr = (git branch --show-current 2>$null).Trim()
-            if ($curr -ne $originalBranch) {
+            $curr = (git branch --show-current 2>$null)
+            if ($curr) { $curr = $curr.Trim() }
+            if ($curr -and $curr -ne $originalBranch) {
                 Write-Host "Restoring original branch '$originalBranch'..." -ForegroundColor DarkGray
                 & git checkout $originalBranch 2>$null
             }
