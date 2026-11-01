@@ -119,7 +119,7 @@ public sealed partial class GitModuleTests
     public void ParseGitBlame()
     {
         using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-        using IDisposable configList = _executable.StageOutput("config list --includes --null", null!);
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", null!);
         GitVersion.ResetVersion();
 
         string path = Path.Combine(TestContext.CurrentContext.TestDirectory, @"TestData/README.blame");
@@ -166,7 +166,7 @@ public sealed partial class GitModuleTests
     public void FetchCmd()
     {
         using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-        using IDisposable configList = _executable.StageOutput("config list --includes --null", null!);
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", null!);
         GitVersion.ResetVersion();
 
         using (_executable.StageOutput("rev-parse --quiet --verify \"refs/heads/remotebranch~0\"", null!))
@@ -737,11 +737,11 @@ public sealed partial class GitModuleTests
         using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
         GitVersion.ResetVersion();
 
-        using IDisposable configListBeforeUnset = _executable.StageOutput("config list --includes --null", "http.proxy\nhttp://proxy:8080\0");
+        using IDisposable configListBeforeUnset = _executable.StageOutput("config list --show-scope --includes --null", "global\0http.proxy\nhttp://proxy:8080\0");
         _gitModule.GetEffectiveSetting("http.proxy").Should().Be("http://proxy:8080");
 
         using IDisposable unset = _executable.StageOutput("config unset --global -- \"http.proxy\"", "", exitCode);
-        using IDisposable configListAfterUnset = _executable.StageOutput("config list --includes --null", "");
+        using IDisposable configListAfterUnset = _executable.StageOutput("config list --show-scope --includes --null", "");
         _gitModule.SetGitSetting(GitSettingLevel.Global, "http.proxy", value: null);
 
         _gitModule.GetEffectiveSetting("http.proxy").Should().BeEmpty();

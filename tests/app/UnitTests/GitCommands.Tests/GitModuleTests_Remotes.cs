@@ -18,8 +18,7 @@ partial class GitModuleTests
         using (_executable.StageOutput($"remote add \"{name}\" \"{path.ToPosixPath()}\"", output))
         {
             using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-            using IDisposable configListEffective = _executable.StageOutput("config list --includes --null", "");
-            using IDisposable configListLocal = _executable.StageOutput("config list --local --includes --null", "");
+            using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", "");
             GitVersion.ResetVersion();
 
             _gitModule.AddRemote(name, path).Should().Be(output);
@@ -40,8 +39,7 @@ partial class GitModuleTests
 
         using IDisposable remoteRemove = _executable.StageOutput($"remote rm \"{remoteName}\"", output);
         using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-        using IDisposable configListEffective = _executable.StageOutput("config list --includes --null", "");
-        using IDisposable configListLocal = _executable.StageOutput("config list --local --includes --null", "");
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", "");
         GitVersion.ResetVersion();
 
         _gitModule.RemoveRemote(remoteName).Should().Be(output);
@@ -59,8 +57,7 @@ partial class GitModuleTests
 
         using IDisposable remoteRename = _executable.StageOutput($"remote rename \"{oldName}\" \"{newName}\"", output);
         using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-        using IDisposable configListEffective = _executable.StageOutput("config list --includes --null", "");
-        using IDisposable configListLocal = _executable.StageOutput("config list --local --includes --null", "");
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", "");
         GitVersion.ResetVersion();
 
         _gitModule.RenameRemote(oldName, newName).Should().Be(output);
@@ -73,6 +70,7 @@ partial class GitModuleTests
     [TestCase("ignorenopull\tgit@github.com:drewnoakes/gitextensions.git (push)")]
     public async Task GetRemotes_should_throw_if_not_pairs(string line)
     {
+        using (_executable.StageOutput("config list --show-scope --includes --null", "global\0url.https://.insteadof\ngit@\0"))
         using (_executable.StageOutput("remote -v", line))
         {
             Func<Task> act = async () => await _gitModule.GetRemotesAsync();
@@ -110,6 +108,7 @@ partial class GitModuleTests
                 "with_option\thttps://github.com/flannelhead/jsmn-stream.git (push) [ignored]"
             ];
 
+        using (_executable.StageOutput("config list --show-scope --includes --null", "global\0url.https://.insteadof\ngit@\0"))
         using (_executable.StageOutput("remote -v", string.Join("\n", lines)))
         {
             IReadOnlyList<GitExtensions.Extensibility.Git.Remote> remotes = await _gitModule.GetRemotesAsync();
@@ -158,12 +157,13 @@ partial class GitModuleTests
     public void GetRemoteNames()
     {
         string[] lines = ["RussKie", "origin", "upstream", "asymmetrical", "with-space"];
+        string config = string.Join("", lines.Select(name => $"local\0remote.{name}.url\nhttps://example.com/{name}.git\0"));
 
-        using (_executable.StageOutput("remote", string.Join("\n", lines)))
+        using (_executable.StageOutput("config list --show-scope --includes --null", config))
         {
             IReadOnlyList<string> remotes = _gitModule.GetRemoteNames();
 
-            remotes.Should().Equal(lines);
+            remotes.Should().Equal(lines.OrderBy(static name => name, StringComparer.Ordinal));
         }
     }
 
@@ -172,36 +172,29 @@ partial class GitModuleTests
     {
         const string origin = nameof(origin);
         const string fork = nameof(fork);
-        const string remotes = $"{origin}\n{fork}";
-        const string settings1 = $"remote.{fork}.color\n#cccccc";
-        const string settings2 = $"{settings1}\0remote.{origin}.color\n#efefef";
+        const string settings1 = $"local\0remote.{fork}.color\n#cccccc\0local\0remote.{fork}.url\nhttps://example.com/fork.git\0";
+        const string settings2 = $"{settings1}local\0remote.{origin}.color\n#efefef\0local\0remote.{origin}.url\nhttps://example.com/origin.git\0";
 
-        // Mock IGitModule.GetRemoteNames() call
-        using (_executable.StageOutput("remote", remotes))
-        {
-            using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-            using IDisposable configListEffective = _executable.StageOutput("config list --includes --null", settings1);
-            using IDisposable configListLocal = _executable.StageOutput("config list --local --includes --null", settings1);
-            GitVersion.ResetVersion();
+        using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", settings1);
+        GitVersion.ResetVersion();
 
-            FrozenDictionary<string, Color> colors = _gitModule.GetRemoteColors();
+        FrozenDictionary<string, Color> colors = _gitModule.GetRemoteColors();
 
-            colors.Count.Should().Be(1);
-            colors[fork].Should().Be(Color.FromArgb(204, 204, 204));
+        colors.Count.Should().Be(1);
+        colors[fork].Should().Be(Color.FromArgb(204, 204, 204));
 
-            // "Color" another remote
-            using IDisposable configListEffective2 = _executable.StageOutput("config list --includes --null", settings2);
-            using IDisposable configListLocal2 = _executable.StageOutput("config list --local --includes --null", settings2);
-            _gitModule.InvalidateGitSettings();
-            _gitModule.GetEffectiveSetting("reload now");
-            _gitModule.GetSettings("reload local settings, too");
+        // "Color" another remote
+        using IDisposable configList2 = _executable.StageOutput("config list --show-scope --includes --null", settings2);
+        _gitModule.InvalidateGitSettings();
+        _gitModule.GetEffectiveSetting("reload now");
+        _gitModule.GetSettings("reload local settings, too");
 
-            // Call again to check if cached colors are returned
-            FrozenDictionary<string, Color> colors1 = _gitModule.GetRemoteColors();
+        // Call again to check if cached colors are returned
+        FrozenDictionary<string, Color> colors1 = _gitModule.GetRemoteColors();
 
-            colors1.Count.Should().Be(1);
-            colors1[fork].Should().Be(Color.FromArgb(204, 204, 204));
-        }
+        colors1.Count.Should().Be(1);
+        colors1[fork].Should().Be(Color.FromArgb(204, 204, 204));
     }
 
     [Test]
@@ -209,51 +202,40 @@ partial class GitModuleTests
     {
         const string origin = nameof(origin);
         const string fork = nameof(fork);
-        const string remotes = $"{origin}\n{fork}";
-        const string settings1 = $"remote.{fork}.color\n#cccccc";
-        const string settings2 = $"{settings1}\0remote.{origin}.color\n#efefef";
+        const string settings1 = $"local\0remote.{fork}.color\n#cccccc\0local\0remote.{fork}.url\nhttps://example.com/fork.git\0";
+        const string settings2 = $"{settings1}local\0remote.{origin}.color\n#efefef\0local\0remote.{origin}.url\nhttps://example.com/origin.git\0";
 
-        // Mock IGitModule.GetRemoteNames() call
-        using (_executable.StageOutput("remote", remotes))
-        {
-            using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-            using IDisposable configListEffective = _executable.StageOutput("config list --includes --null", settings1);
-            using IDisposable configListLocal = _executable.StageOutput("config list --local --includes --null", settings1);
-            GitVersion.ResetVersion();
+        using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", settings1);
+        GitVersion.ResetVersion();
 
-            FrozenDictionary<string, Color> colors = _gitModule.GetRemoteColors();
+        FrozenDictionary<string, Color> colors = _gitModule.GetRemoteColors();
 
-            colors.Count.Should().Be(1);
-            colors[fork].Should().Be(Color.FromArgb(204, 204, 204));
+        colors.Count.Should().Be(1);
+        colors[fork].Should().Be(Color.FromArgb(204, 204, 204));
 
-            // "Color" another remote
-            using IDisposable configListEffective2 = _executable.StageOutput("config list --includes --null", settings2);
-            using IDisposable configListLocal2 = _executable.StageOutput("config list --local --includes --null", settings2);
-            _gitModule.InvalidateGitSettings();
-            _gitModule.GetEffectiveSetting("reload now");
-            _gitModule.GetSettings("reload local settings, too");
+        // "Color" another remote
+        using IDisposable configList2 = _executable.StageOutput("config list --show-scope --includes --null", settings2);
+        _gitModule.InvalidateGitSettings();
+        _gitModule.GetEffectiveSetting("reload now");
+        _gitModule.GetSettings("reload local settings, too");
 
-            // Call again to check if cached colors are returned
-            FrozenDictionary<string, Color> colors1 = _gitModule.GetRemoteColors();
+        // Call again to check if cached colors are returned
+        FrozenDictionary<string, Color> colors1 = _gitModule.GetRemoteColors();
 
-            colors1.Count.Should().Be(1);
+        colors1.Count.Should().Be(1);
 
-            // Reset the colors
-            _gitModule.ResetRemoteColors();
+        // Reset the colors
+        _gitModule.ResetRemoteColors();
 
-            _gitModule.GetTestAccessor().RemoteColors.Should().BeNull();
-        }
+        _gitModule.GetTestAccessor().RemoteColors.Should().BeNull();
 
-        // Mock IGitModule.GetRemoteNames() call
-        using (_executable.StageOutput("remote", remotes))
-        {
-            // Reload the colors
-            FrozenDictionary<string, Color> colors2 = _gitModule.GetRemoteColors();
+        // Reload the colors
+        FrozenDictionary<string, Color> colors2 = _gitModule.GetRemoteColors();
 
-            colors2.Count.Should().Be(2);
-            colors2[fork].Should().Be(Color.FromArgb(204, 204, 204)); // "#cccccc"
-            colors2[origin].Should().Be(Color.FromArgb(239, 239, 239)); // "#efefef"
-        }
+        colors2.Count.Should().Be(2);
+        colors2[fork].Should().Be(Color.FromArgb(204, 204, 204)); // "#cccccc"
+        colors2[origin].Should().Be(Color.FromArgb(239, 239, 239)); // "#efefef"
     }
 
     [Test]
@@ -261,25 +243,19 @@ partial class GitModuleTests
     {
         const string origin = nameof(origin);
         const string fork = nameof(fork);
-        const string remotes = $"{origin}\n{fork}";
-        const string settings1 = $"remote.{fork}.color\n#cccccc";
+        const string settings1 = $"local\0remote.{fork}.color\n#cccccc\0local\0remote.{fork}.url\nhttps://example.com/fork.git\0";
 
-        // Mock IGitModule.GetRemoteNames() call
-        using (_executable.StageOutput("remote", remotes))
-        {
-            using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
-            using IDisposable configListEffective = _executable.StageOutput("config list --includes --null", settings1);
-            using IDisposable configListLocal = _executable.StageOutput("config list --local --includes --null", settings1);
-            GitVersion.ResetVersion();
+        using IDisposable gitVersion = _executable.StageOutput("--version", "git version 2.46.0");
+        using IDisposable configList = _executable.StageOutput("config list --show-scope --includes --null", settings1);
+        GitVersion.ResetVersion();
 
-            FrozenDictionary<string, Color> colors = _gitModule.GetRemoteColors();
+        FrozenDictionary<string, Color> colors = _gitModule.GetRemoteColors();
 
-            colors.Count.Should().Be(1);
-            _gitModule.GetTestAccessor().RemoteColors!.Count.Should().Be(1);
+        colors.Count.Should().Be(1);
+        _gitModule.GetTestAccessor().RemoteColors!.Count.Should().Be(1);
 
-            _gitModule.ResetRemoteColors();
+        _gitModule.ResetRemoteColors();
 
-            _gitModule.GetTestAccessor().RemoteColors.Should().BeNull();
-        }
+        _gitModule.GetTestAccessor().RemoteColors.Should().BeNull();
     }
 }
