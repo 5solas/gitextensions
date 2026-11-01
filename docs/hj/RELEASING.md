@@ -48,7 +48,11 @@ flowchart TD
 2. **포크 버전 번호 증가**:
    - `eng/hj/VERSION` 파일을 열고 버전 번호를 1 증가시킵니다. (예: `1` -> `2`)
 3. **릴리스 패키징 및 태그 생성 (`Release.ps1`)**:
-   - 로컬 개발 환경(WiX/MSVC 부재)에서는 `-SkipMsi` 옵션을 지정하여 포터블 zip 번들을 빌드하고, `-Tag`로 릴리스 태그를 생성합니다:
+   - Visual Studio Build Tools 2026이 갖춰진 환경에서는 `Release.ps1` 실행 시 네이티브 바이너리와 MSI 패키지가 기본으로 함께 빌드됩니다:
+     ```pwsh
+     pwsh eng/hj/Release.ps1 -Configuration Release -Tag
+     ```
+   - C++ 도구나 WiX가 없거나 포터블 zip만 제작할 때는 `-SkipMsi` 옵션을 지정합니다:
      ```pwsh
      pwsh eng/hj/Release.ps1 -Configuration Release -SkipMsi -Tag
      ```
@@ -118,11 +122,30 @@ flowchart TD
 
 ---
 
-## 6. 로컬 환경의 빌드 제약 사항 (참고)
+## 6. 로컬 환경의 네이티브 및 MSI 빌드 지원 (참고)
 
-1. **네이티브 C++ 빌드 도구 부재 (MSVC)**:
-   - 로컬 개발 환경에는 Visual Studio C++ 도구 체인(MSVC)이 설치되어 있지 않으므로 `src/native/build.proj` 빌드가 수행되지 않습니다.
-   - 따라서 `GitExtensionsShellEx` (셸 확장 dll) 및 `GitExtSshAskPass` (SSH 패스워드 프롬프트 exe) 등의 네이티브 C++ 바이너리는 빌드되지 않습니다.
-2. **설치 패키지(MSI) 빌드 (`-SkipMsi` 필요)**:
-   - 로컬 개발 머신에는 WiX 툴체인 및 MSVC 네이티브 C++ 산출물이 없으므로 로컬에서는 `-SkipMsi` 옵션을 사용하여 포터블 zip 번들을 제작합니다.
-   - 완전한 설치 패키지(MSI) 및 네이티브 구성 요소 바이너리 제작은 MSVC 및 WiX 환경이 완비된 GitHub Actions CI(`hj-release.yml`)에서 수행합니다.
+로컬 머신에 Visual Studio 또는 Visual Studio Build Tools 2026이 설치되어 있으면 로컬에서도 C++ 네이티브 구성 요소 및 WiX MSI 설치 패키지를 빌드할 수 있습니다.
+
+### 필수 도구 및 설치 명령 (winget)
+
+Visual Studio Build Tools 2026을 사용하여 로컬 네이티브 바이너리 및 MSI를 빌드하려면 C++ 빌드 도구 워크로드뿐만 아니라 **C++ ATL 컴포넌트(`Microsoft.VisualStudio.Component.VC.ATL`)**가 반드시 포함되어야 합니다 (`GitExtensionsShellEx` 및 `GitExtSshAskPass` 빌드에 ATL 필수).
+
+- **Build Tools 신규 설치 (관리자 권한 PowerShell)**:
+  ```pwsh
+  winget install Microsoft.VisualStudio.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.ATL --includeRecommended"
+  ```
+- **기존 Build Tools에 ATL 구성 요소 추가 (관리자 권한 PowerShell)**:
+  ```pwsh
+  & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools" --add Microsoft.VisualStudio.Component.VC.ATL --passive
+  ```
+
+### 로컬 빌드 동작 방식
+
+1. **네이티브 C++ 바이너리 자동 감지 빌드**:
+   - `Release.ps1`은 `vswhere`를 통해 `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`를 확인합니다.
+   - 도구가 감지되면 .NET 솔루션 빌드 전에 `src/native/build.proj`를 자동 복원·빌드하여 `GitExtSshAskPass.exe` 및 `GitExtensionsShellEx32/64.dll`을 생성합니다. 도구가 없으면 경고 후 네이티브 빌드를 건너뜁니다.
+2. **설치 패키지(MSI) 자동 빌드 및 `-SkipMsi`**:
+   - VS MSBuild 및 네이티브 산출물이 준비되어 있으면 `Release.ps1`은 기본적으로 MSI 설치 패키지를 생성합니다.
+   - MSI 생성을 건너뛰고 포터블 zip만 생성하려면 명시적으로 `-SkipMsi` 옵션을 지정합니다.
+3. **기본 릴리스 배포 경로 유지**:
+   - 로컬에서 네이티브·MSI 빌드가 지원되더라도 공식 릴리스 배포는 태그 푸시를 통한 GitHub Actions CI(`hj-release.yml`)를 표준 경로로 유지합니다.
