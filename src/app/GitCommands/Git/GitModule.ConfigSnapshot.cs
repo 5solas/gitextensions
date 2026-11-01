@@ -22,7 +22,7 @@ public sealed partial class GitModule
             {
                 lock (_lock)
                 {
-                    _configSnapshotProvider ??= new GitConfigSnapshotProvider(GitExecutable);
+                    _configSnapshotProvider ??= GitConfigSnapshotProviderCache.GetOrAdd(GitExecutable);
                 }
             }
 
