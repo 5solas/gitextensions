@@ -77,7 +77,51 @@ try {
         Pop-Location
     }
 
-    # (e) Build .NET
+    # (e) Build native components if C++ tools are available
+    $vswherePath = $null
+    $vswhereCmd = Get-Command vswhere -ErrorAction SilentlyContinue
+    if ($vswhereCmd) {
+        $vswherePath = $vswhereCmd.Source
+    } else {
+        $installerVswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $installerVswhere) {
+            $vswherePath = $installerVswhere
+        } else {
+            $nugetVswhere = Get-ChildItem -Path (Join-Path $env:USERPROFILE ".nuget\packages\vswhere") -Filter "vswhere.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            if ($nugetVswhere) {
+                $vswherePath = $nugetVswhere[-1]
+            }
+        }
+    }
+
+    $vcToolsPath = $null
+    if ($vswherePath) {
+        $vcToolsOutput = (& $vswherePath -latest -products * -property installationPath -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64)
+        if ($vcToolsOutput) {
+            $vcToolsPath = $vcToolsOutput.Trim()
+        }
+    }
+
+    if ($vcToolsPath) {
+        Write-Host "`nBuilding native components ($Configuration)..." -ForegroundColor Yellow
+        Push-Location $repoRoot
+        try {
+            dotnet restore src/native/build.proj
+            if ($LASTEXITCODE -ne 0) {
+                throw "dotnet restore src/native/build.proj failed with exit code $LASTEXITCODE"
+            }
+            dotnet build src/native/build.proj -c $Configuration --nologo
+            if ($LASTEXITCODE -ne 0) {
+                throw "dotnet build src/native/build.proj failed with exit code $LASTEXITCODE"
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Warning "Visual Studio C++ build tools (VC.Tools.x86.x64) not detected. Skipping native components build."
+    }
+
+    # (f) Build .NET
     Write-Host "`nBuilding solution ($Configuration)..." -ForegroundColor Yellow
     Push-Location $repoRoot
     try {
@@ -89,8 +133,26 @@ try {
         Pop-Location
     }
 
-    # (f) Publish if not skipped
+    # (g) Publish if not skipped
     if (-not $SkipPublish) {
+        if (-not $SkipMsi) {
+            $hasVsMsbuild = $false
+            if ($vswherePath) {
+                $vsMsbuildOutput = (& $vswherePath -latest -prerelease -products * -property installationPath -requires Microsoft.Component.MSBuild)
+                if ($vsMsbuildOutput -and (Test-Path (Join-Path $vsMsbuildOutput.Trim() "MSBuild\Current\Bin\MSBuild.exe"))) {
+                    $hasVsMsbuild = $true
+                }
+            }
+
+            if (-not $hasVsMsbuild) {
+                Write-Warning "VS MSBuild not detected via vswhere. Skipping MSI creation."
+                $SkipMsi = $true
+            } elseif (-not $vcToolsPath) {
+                Write-Warning "Native components were not built. Skipping MSI creation."
+                $SkipMsi = $true
+            }
+        }
+
         Write-Host "`nPublishing solution ($Configuration)..." -ForegroundColor Yellow
         $prevSuffix = $env:ARTIFACT_BUILD_SUFFIX
         $env:ARTIFACT_BUILD_SUFFIX = $suffix
@@ -119,7 +181,7 @@ try {
         }
     }
 } finally {
-    # (g) Revert stamp files
+    # (h) Revert stamp files
     Write-Host "`nReverting stamped version files..." -ForegroundColor Yellow
     $stampFilesMain = @(
         "CommonAssemblyInfo.cs",
@@ -184,7 +246,7 @@ try {
     }
 }
 
-# (h) Create tag if requested
+# (i) Create tag if requested
 if ($Tag) {
     $tagName = "hj/v$stringVersion"
     $existingTag = (git -C $repoRoot tag -l $tagName)
@@ -198,7 +260,7 @@ if ($Tag) {
     Write-Host "Created tag: $tagName" -ForegroundColor Green
 }
 
-# (i) Output summary
+# (j) Output summary
 Write-Host "`n=== Release Summary ===" -ForegroundColor Cyan
 Write-Host "Version String:  $stringVersion"
 Write-Host "Numeric Version: $numericVersion"
