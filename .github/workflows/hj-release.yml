@@ -1,0 +1,209 @@
+name: hj-release
+
+on:
+  push:
+    tags:
+      - 'hj/v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing git tag to release (e.g. hj/v7.3.0-hj-1)'
+        required: true
+        type: string
+
+concurrency:
+  group: hj-release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build + package (x64)
+    if: github.repository_owner == '5solas'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      version-text: ${{ steps.version.outputs.version-text }}
+      suffix: ${{ steps.version.outputs.suffix }}
+      git-commit: ${{ steps.version.outputs.git-commit }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag != '' && (startsWith(inputs.tag, 'refs/tags/') && inputs.tag || format('refs/tags/{0}', inputs.tag)) || github.ref }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Install WiX
+        run: dotnet tool install --global wix
+
+      - name: Mark the repo as clean
+        run: .\eng\Mark-RepoClean.ps1
+
+      - name: Resolve release version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.tag }}".Trim()
+          if (-not $tag) {
+            $ref = "${{ github.ref }}"
+            if ($ref -match '^refs/tags/(.+)$') {
+              $tag = $Matches[1]
+            } else {
+              $tag = $ref
+            }
+          }
+          if ($tag.StartsWith("refs/tags/")) {
+            $tag = $tag.Substring("refs/tags/".Length)
+          }
+
+          Write-Host "Resolving version from tag: $tag"
+
+          if ($tag -notmatch '^hj/v(?<base>[0-9]+(?:\.[0-9]+)+)-hj-(?<num>[0-9]+)$') {
+            Write-Error "Invalid tag '$tag'. Tag must match format 'hj/v<base>-hj-<N>' (e.g. 'hj/v7.3.0-hj-1')."
+            exit 1
+          }
+
+          $base = $Matches['base']
+          $num = $Matches['num']
+          $numericVersion = "$base.$num"
+          $stringVersion = "$base-hj-$num"
+          $suffix = "-hj-$num"
+          $shortSha = (git rev-parse --short HEAD).Trim()
+
+          Write-Host "Base:            $base"
+          Write-Host "Number:          $num"
+          Write-Host "Numeric Version: $numericVersion"
+          Write-Host "String Version:  $stringVersion"
+          Write-Host "Suffix:          $suffix"
+          Write-Host "Git Commit:      $shortSha"
+
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$numericVersion" >> $env:GITHUB_OUTPUT
+          "version-text=$stringVersion" >> $env:GITHUB_OUTPUT
+          "suffix=$suffix" >> $env:GITHUB_OUTPUT
+          "git-commit=$shortSha" >> $env:GITHUB_OUTPUT
+
+          "VERSION=$numericVersion" >> $env:GITHUB_ENV
+          "VERSION_TEXT=$stringVersion" >> $env:GITHUB_ENV
+          "ARTIFACT_BUILD_SUFFIX=$suffix" >> $env:GITHUB_ENV
+          "GIT_COMMIT=$shortSha" >> $env:GITHUB_ENV
+
+      - name: Set version
+        working-directory: eng
+        run: dotnet run set_version_to.cs -- -v ${{ env.VERSION }} -t ${{ env.VERSION_TEXT }}
+
+      - name: Build native code
+        run: dotnet build src\native\build.proj -c Release --verbosity q --nologo /bl:artifacts\log\native.binlog
+
+      - name: Build .NET
+        shell: pwsh
+        run: dotnet build -c Release --verbosity q --nologo /bl:artifacts\log\build.binlog /p:ContinuousIntegrationBuild=true /p:GitCommit=$env:GIT_COMMIT
+
+      - name: Publish
+        shell: pwsh
+        env:
+          ARTIFACT_BUILD_SUFFIX: ${{ steps.version.outputs.suffix }}
+        run: dotnet publish -c Release --no-build /bl:artifacts\log\publish.binlog /p:ContinuousIntegrationBuild=true /p:GitCommit=$env:GIT_COMMIT
+
+      - name: Display artifacts
+        shell: pwsh
+        run: ls -R artifacts/Release/publish/
+
+      - name: Upload distribution files
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hj-dist-x64
+          path: |
+            artifacts/Release/publish/*.msi
+            artifacts/Release/publish/*.zip
+          retention-days: 7
+
+      - name: Upload build logs on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: build-logs-windows-latest
+          path: |
+            artifacts\**\log\**\*.binlog
+            artifacts\Release\**\*.dgml
+          retention-days: 7
+          if-no-files-found: ignore
+
+  upload:
+    name: Upload to GitHub Release
+    if: github.repository_owner == '5solas'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.build.outputs.tag }}
+
+      - name: Download distribution files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: hj-dist-x64
+          path: dist
+
+      - name: Display downloaded files
+        run: ls -la dist/
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ needs.build.outputs.tag }}"
+          version_text="${{ needs.build.outputs.version-text }}"
+          release_title="Git Extensions $version_text"
+          release_notes="docs/hj/release-notes/$version_text.md"
+
+          # Check if the release for the tag already exists
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release '$tag' already exists."
+          else
+            echo "Release '$tag' not found. Creating new release..."
+            if [ -f "$release_notes" ]; then
+              echo "Using release notes from $release_notes"
+              gh release create "$tag" --title "$release_title" --notes-file "$release_notes"
+            else
+              echo "Release notes file '$release_notes' not found. Using default release notes."
+              gh release create "$tag" --title "$release_title" --notes "Git Extensions $version_text release."
+            fi
+          fi
+
+          # Upload MSI and portable zip to GitHub release.
+          # Note: --clobber replaces any existing assets with the same name (such as portable zip uploaded manually/locally).
+          echo "Uploading distribution assets to release '$tag' with --clobber..."
+          shopt -s nullglob
+          files=(dist/*.msi dist/*.zip)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "Error: No .msi or .zip distribution files found in dist directory!" >&2
+            exit 1
+          fi
+          gh release upload "$tag" "${files[@]}" --clobber
