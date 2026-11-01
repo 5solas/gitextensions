@@ -700,7 +700,7 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
     /// </summary>
     private void RefreshRevisions()
     {
-        RefreshRevisions(new FilteredGitRefsProvider(UICommands.Module).GetRefs);
+        RefreshRevisions(new FilteredGitRefsProvider(UICommands.Module, withTaggerDate: true).GetRefs);
     }
 
     /// <summary>
@@ -762,7 +762,10 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         CancellationToken gpgInfoCancellationToken = _gpgInfoSequence.Next();
         revisionGpgInfo1.InvokeAndForget(() => FillGpgInfoAsync(selectedRevision, gpgInfoCancellationToken), cancellationToken: gpgInfoCancellationToken);
         FillBuildReport(selectedRevision);
-        repoObjectsTree.SelectionChanged(selectedRevisions);
+        if (!MainSplitContainer.Panel1Collapsed)
+        {
+            repoObjectsTree.SelectionChanged(selectedRevisions);
+        }
     }
 
     #region IBrowseRepo
@@ -1072,7 +1075,7 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
                         // because getting ahead - behind data for all branches will be (very ?) long
                         // * when there are few branches, we will end up here not in 1st
                         // and the data will be taken from cache (so what we pass as argument is kind of useless)
-                        IReadOnlyDictionary<string, AheadBehindData>? aheadBehindData = _aheadBehindDataProvider?.GetData(currentBranch);
+                        IReadOnlyDictionary<string, AheadBehindData>? aheadBehindData = _aheadBehindDataProvider?.GetData();
                         await this.SwitchToMainThreadAsync();
                         toolStripButtonPush.DisplayAheadBehindInformation(aheadBehindData, currentBranch, GetShortcutKeyTooltipString(Command.Push));
                     });
@@ -2838,8 +2841,9 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
                 ? []
                 : new RevisionReader(new GitModule(UICommands.GetRequiredService<IGitExecutorProvider>(), UICommands.Module.WorkingDir)).GetStashes(CancellationToken.None));
 
-            RefreshLeftPanel(new FilteredGitRefsProvider(UICommands.Module).GetRefs, getStashRevs, forceRefresh: true);
+            RefreshLeftPanel(new FilteredGitRefsProvider(UICommands.Module, withTaggerDate: true).GetRefs, getStashRevs, forceRefresh: true);
             repoObjectsTree.RefreshRevisionsLoaded();
+            repoObjectsTree.SelectionChanged(RevisionGrid.GetSelectedRevisions());
         }
     }
 

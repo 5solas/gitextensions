@@ -1,9 +1,11 @@
 ﻿using System.Runtime.CompilerServices;
 using CommonTestUtils;
 using GitCommands;
+using GitCommands.Logging;
 using GitExtensions.Extensibility.Git;
 using GitUI;
 using GitUI.CommandsDialogs;
+using GitUIPluginInterfaces;
 
 namespace GitExtensions.UITests.CommandsDialogs;
 
@@ -369,6 +371,59 @@ public class FormBrowseTests
                     WaitForCommitMessageAfterRepositorySwitch(form, "REPO_B_HEAD", "REPO_A_HEAD");
                 },
                 commandsA);
+        }
+    }
+
+    [Test]
+    public void FormBrowse_process_budget_should_not_spawn_duplicate_git_processes_during_tab_switching()
+    {
+        using (CommitInfoPanelTestSettingsScope.ForBrowseRepositorySwitch())
+        {
+            using GitModuleTestHelper repo = new("formBrowseProcessBudget");
+            CreateCommitWithSubject(repo, "HEAD commit for budget test");
+
+            GitUICommands commands = new(GlobalServiceContainer.CreateDefaultMockServiceContainer(), repo.Module);
+
+            CommandLog.Clear();
+
+            RunFormTest(
+                form =>
+                {
+                    FormBrowse.TestAccessor ta = form.GetTestAccessor();
+
+                    WaitForRevisionsToBeLoaded(form);
+
+                    // 1. CommitInfo tab
+                    ta.CommitInfoTabControl.SelectedTab = ta.CommitInfoTabPage;
+                    UITest.ProcessUntil("commit info loaded", () => ta.RevisionInfo.GetTestAccessor().CommitMessage.Text.Contains("HEAD commit for budget test", StringComparison.Ordinal), maxMilliseconds: 5000);
+
+                    // 2. Diff tab
+                    ta.CommitInfoTabControl.SelectedTab = ta.DiffTabPage;
+                    UITest.ProcessUntil("diff tab selected", () => ta.CommitInfoTabControl.SelectedTab == ta.DiffTabPage, maxMilliseconds: 2000);
+
+                    // 3. CommitInfo tab
+                    ta.CommitInfoTabControl.SelectedTab = ta.CommitInfoTabPage;
+                    UITest.ProcessUntil("commit info selected again", () => ta.CommitInfoTabControl.SelectedTab == ta.CommitInfoTabPage, maxMilliseconds: 2000);
+
+                    List<CommandLogEntry> commandList = CommandLog.Commands.ToList();
+
+                    // 1. branch ... --merged: 1 count
+                    int mergedBranchCount = commandList.Count(c => c.Arguments.Contains("branch") && c.Arguments.Contains("--merged"));
+                    mergedBranchCount.Should().Be(1, "branch --merged should be called exactly once");
+
+                    // 2. for-each-ref --sort=-taggerdate: 0 count
+                    int sortedTagsCount = commandList.Count(c => c.Arguments.Contains("for-each-ref") && c.Arguments.Contains("-taggerdate"));
+                    sortedTagsCount.Should().Be(0, "for-each-ref --sort=-taggerdate should not be called (CommitInfo uses host refs)");
+
+                    // 3. ahead/behind for-each-ref ... refs/heads/: 1 count
+                    int aheadBehindCount = commandList.Count(c => c.Arguments.Contains("for-each-ref") && c.Arguments.Contains("refs/heads/"));
+                    aheadBehindCount.Should().Be(1, "ahead/behind for-each-ref refs/heads/ should be called exactly once");
+
+                    // 4. for-each-ref all refs: 1 count
+                    int allRefsCount = commandList.Count(c => c.Arguments.Contains("for-each-ref") && !c.Arguments.Contains("refs/heads/") && !c.Arguments.Contains("-taggerdate"));
+                    allRefsCount.Should().Be(1, "for-each-ref for all refs should be called exactly once");
+                },
+                commands);
         }
     }
 

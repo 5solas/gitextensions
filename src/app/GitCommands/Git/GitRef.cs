@@ -25,12 +25,15 @@ public sealed class GitRef : IGitRef
 
     public IGitModule Module { get; }
 
-    public GitRef(IGitModule module, ObjectId objectId, string completeName, string remote = "")
+    public DateTimeOffset? TaggerDate { get; }
+
+    public GitRef(IGitModule module, ObjectId objectId, string completeName, string remote = "", DateTimeOffset? taggerDate = null)
     {
         Module = module;
         ObjectId = objectId;
         CompleteName = completeName;
         Remote = remote;
+        TaggerDate = taggerDate;
         IsDereference = CompleteName.EndsWith(GitRefName.TagDereferenceSuffix);
         _type = DetermineType(completeName);
         Name = ParseName(completeName, _type, IsDereference);

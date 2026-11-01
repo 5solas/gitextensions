@@ -253,6 +253,32 @@ public sealed partial class GitModuleTests
         refs[3].Module.Should().BeSameAs(_gitModule);
     }
 
+    [Test]
+    public void ParseRefs_should_parse_taggerdate_when_present()
+    {
+        const string refList =
+            "69a7c7a40230346778e7eebed809773a6bc45268 refs/heads/master\0\n" +
+            "366dfba1abf6cb98d2934455713f3d190df2ba34 refs/tags/v1.0^{}\01700000000\n" +
+            "5303e7114f1896c639dea0231fac522752cc44a2 refs/tags/lightweight\0\n" +
+            "1234567890123456789012345678901234567890 refs/tags/invalid\0not-a-number\n";
+
+        IReadOnlyList<IGitRef> refs = _gitModule.ParseRefs(refList);
+
+        refs.Count.Should().Be(4);
+
+        refs[0].CompleteName.Should().Be("refs/heads/master");
+        ((GitRef)refs[0]).TaggerDate.Should().BeNull();
+
+        refs[1].CompleteName.Should().Be("refs/tags/v1.0^{}");
+        ((GitRef)refs[1]).TaggerDate.Should().Be(DateTimeOffset.FromUnixTimeSeconds(1700000000));
+
+        refs[2].CompleteName.Should().Be("refs/tags/lightweight");
+        ((GitRef)refs[2]).TaggerDate.Should().BeNull();
+
+        refs[3].CompleteName.Should().Be("refs/tags/invalid");
+        ((GitRef)refs[3]).TaggerDate.Should().BeNull();
+    }
+
     [TestCase("branch -a --contains",
         true,
         true,
