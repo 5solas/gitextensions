@@ -121,6 +121,87 @@ public class CommitInfoTests
     }
 
     [Test]
+    public void TryGetSortedTagsFromRefs_should_sort_annotated_descending_and_lightweight_ascending()
+    {
+        GitRef[] refs =
+        [
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/tags/v1.0^{}", "", DateTimeOffset.FromUnixTimeSeconds(1000)),
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/tags/v3.0^{}", "", DateTimeOffset.FromUnixTimeSeconds(3000)),
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/tags/v2.0^{}", "", DateTimeOffset.FromUnixTimeSeconds(2000)),
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/tags/v2.5^{}", "", DateTimeOffset.FromUnixTimeSeconds(2000)),
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/tags/light-b", "", taggerDate: null),
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/tags/light-a", "", taggerDate: null),
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/heads/main", "", taggerDate: null),
+        ];
+
+        IDictionary<string, int>? result = GitUI.CommitInfo.CommitInfo.TryGetSortedTagsFromRefs(_ => refs);
+
+        result.Should().NotBeNull();
+        result!.Should().HaveCount(6);
+
+        result["refs/tags/v3.0"].Should().Be(0);
+        result["refs/tags/v2.0"].Should().Be(1);
+        result["refs/tags/v2.5"].Should().Be(2);
+        result["refs/tags/v1.0"].Should().Be(3);
+
+        result["refs/tags/light-a"].Should().Be(4);
+        result["refs/tags/light-b"].Should().Be(5);
+    }
+
+    [Test]
+    public void TryGetSortedTagsFromRefs_should_return_null_if_no_tagger_dates()
+    {
+        GitRef[] refs =
+        [
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/tags/v1.0", "", taggerDate: null),
+            new(_referenceRepository.Module, ObjectId.Random(), "refs/tags/v2.0", "", taggerDate: null),
+        ];
+
+        IDictionary<string, int>? result = GitUI.CommitInfo.CommitInfo.TryGetSortedTagsFromRefs(_ => refs);
+
+        result.Should().BeNull();
+    }
+
+    [Test]
+    public void TryGetSortedTagsFromRefs_should_match_git_sorted_tags_in_real_repository()
+    {
+        using GitModuleTestHelper helper = new("sortedTagsEquivalence");
+        helper.Module.GitExecutable.GetOutput("commit --allow-empty -m \"Initial commit\"");
+
+        helper.Module.GitExecutable.GetOutput("tag light_b");
+        helper.Module.GitExecutable.GetOutput("tag light_a");
+
+        using (LibGit2Sharp.Repository repo = new(helper.Module.WorkingDir))
+        {
+            string commitSha = repo.Head.Tip.Sha;
+            DateTimeOffset d1 = new(2023, 1, 1, 10, 0, 0, TimeSpan.Zero);
+            DateTimeOffset d2 = new(2023, 1, 2, 10, 0, 0, TimeSpan.Zero);
+            LibGit2Sharp.Signature s1 = new("Tester", "test@test.com", d1);
+            LibGit2Sharp.Signature s2 = new("Tester", "test@test.com", d2);
+            repo.Tags.Add("annot_1", commitSha, s1, "tag 1");
+            repo.Tags.Add("annot_2", commitSha, s2, "tag 2");
+            repo.Tags.Add("annot_3", commitSha, s2, "tag 3");
+        }
+
+        FilteredGitRefsProvider provider = new(helper.Module, withTaggerDate: true);
+        IDictionary<string, int>? fromRefs = GitUI.CommitInfo.CommitInfo.TryGetSortedTagsFromRefs(provider.GetRefs);
+
+        GitUICommands commands = new(GlobalServiceContainer.CreateDefaultMockServiceContainer(), helper.Module);
+        IGitUICommandsSource uiCommandsSource = Substitute.For<IGitUICommandsSource>();
+        uiCommandsSource.UICommands.Returns(commands);
+        using GitUI.CommitInfo.CommitInfo commitInfo = new() { UICommandsSource = uiCommandsSource };
+        IDictionary<string, int> gitSorted = commitInfo.GetTestAccessor().GetSortedTags();
+
+        Dictionary<string, int> gitSortedTags = gitSorted
+            .Where(kv => !string.IsNullOrEmpty(kv.Key))
+            .ToDictionary();
+
+        fromRefs.Should().NotBeNull();
+        fromRefs!.Should().HaveCount(gitSortedTags.Count);
+        fromRefs.Should().Equal(gitSortedTags);
+    }
+
+    [Test]
     public void GetSortedTags_should_load_ref_with_extra_spaces()
     {
         RunCommitInfoTest(commitInfo =>
