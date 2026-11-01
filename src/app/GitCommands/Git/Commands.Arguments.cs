@@ -290,7 +290,7 @@ public static partial class Commands
             };
     }
 
-    public static ArgumentString GetRefs(RefsFilter getRef, bool noLocks, GitRefsSortBy sortBy, GitRefsSortOrder sortOrder, int count = 0)
+    public static ArgumentString GetRefs(RefsFilter getRef, bool noLocks, GitRefsSortBy sortBy, GitRefsSortOrder sortOrder, int count = 0, bool withTaggerDate = false)
     {
         bool hasTags = (getRef == RefsFilter.NoFilter) || (getRef & RefsFilter.Tags) != 0;
 
@@ -298,7 +298,7 @@ public static partial class Commands
             gitOptions: noLocks ? (ArgumentString)"--no-optional-locks" : default)
         {
             SortCriteria(hasTags, sortBy, sortOrder),
-            GitRefsFormat(hasTags),
+            GitRefsFormat(hasTags, withTaggerDate),
             { count > 0, $"--count={count}" },
             GitRefsPattern(getRef)
         };
@@ -335,12 +335,14 @@ public static partial class Commands
             return $@"--sort=""{order}*{derefSortKey}"" --sort=""{order}{sortKey}""";
         }
 
-        static ArgumentString GitRefsFormat(bool needTags)
+        static ArgumentString GitRefsFormat(bool needTags, bool withTaggerDate)
         {
             if (!needTags)
             {
                 // If we don't need tags, it is easy.
-                return @"--format=""%(objectname) %(refname)""";
+                return withTaggerDate
+                    ? @"--format=""%(objectname) %(refname)%00%(taggerdate:unix)"""
+                    : @"--format=""%(objectname) %(refname)""";
             }
 
             // ...however, if we're interested in tags, tags may be simple (in which case they are point to commits directly),
@@ -353,7 +355,9 @@ public static partial class Commands
             //      Else
             //          format = %(*objectname) %(*refname) // i.e. info from a referenced commit
             //      End
-            return @"--format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)""";
+            return withTaggerDate
+                ? @"--format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)%00%(taggerdate:unix)"""
+                : @"--format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)""";
         }
 
         static ArgumentString GitRefsPattern(RefsFilter option)

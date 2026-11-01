@@ -3109,10 +3109,10 @@ public sealed partial class GitModule : IGitModule
 
         foreach (Match match in matches)
         {
-            string refName = match.Groups["refname"].Value;
+            (string refName, DateTimeOffset? taggerDate) = ParseRefNameAndTaggerDate(match.Groups["refname"].Value);
             ObjectId objectId = ObjectId.Parse(refList, match.Groups["objectid"]);
             string remoteName = GitRefName.GetRemoteName(refName);
-            GitRef head = new(this, objectId, refName, remoteName);
+            GitRef head = new(this, objectId, refName, remoteName, taggerDate);
 
             if (GitRefName.IsRemoteHead(refName))
             {

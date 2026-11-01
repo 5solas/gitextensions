@@ -7,8 +7,15 @@ namespace GitExtensions.Extensibility.Git;
 public sealed class FilteredGitRefsProvider : IFilteredGitRefsProvider
 {
     public FilteredGitRefsProvider(IGitModule module)
+        : this(module, withTaggerDate: false)
     {
-        _getRefs = new(() => module.GetRefs(RefsFilter.NoFilter));
+    }
+
+    public FilteredGitRefsProvider(IGitModule module, bool withTaggerDate)
+    {
+        _getRefs = new(() => withTaggerDate
+            ? module.GetRefs(RefsFilter.NoFilter, withTaggerDate: true)
+            : module.GetRefs(RefsFilter.NoFilter));
     }
 
     public FilteredGitRefsProvider(Lazy<IReadOnlyList<IGitRef>> getRefs)

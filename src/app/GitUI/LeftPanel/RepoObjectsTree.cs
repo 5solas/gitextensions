@@ -242,6 +242,7 @@ public sealed partial class RepoObjectsTree : GitModuleControl
     /// <param name="forceRefresh">Refresh may be required as references may have been changed.</param>
     public void RefreshRevisionsLoading(Func<RefsFilter, IReadOnlyList<IGitRef>> getRefs, Lazy<IReadOnlyCollection<GitRevision>> getStashRevs, bool forceRefresh)
     {
+        ResetMergedBranchesCache();
         _branchesTree.Refresh(getRefs);
         _remotesTree.Refresh(getRefs);
         _worktreeTree.Refresh();
@@ -284,11 +285,17 @@ public sealed partial class RepoObjectsTree : GitModuleControl
 
     public void SelectionChanged(IReadOnlyList<GitRevision> selectedRevisions)
     {
+        if (!TryBeginMergedBranchesUpdate(selectedRevisions, out MergedBranchesCacheKey key))
+        {
+            return;
+        }
+
         // If we arrived here through the chain of events after selecting a node in the tree,
         // and the selected revision is the one we have selected - do nothing.
         if ((selectedRevisions.Count == 0 && treeMain.SelectedNode is null)
             || (selectedRevisions.Count == 1 && selectedRevisions[0].ObjectId == GetSelectedNodeObjectId(treeMain.SelectedNode!)))
         {
+            ResetMergedBranchesKey(key);
             return;
         }
 
@@ -362,6 +369,7 @@ public sealed partial class RepoObjectsTree : GitModuleControl
 
     protected override void OnUICommandsSourceSet(IGitUICommandsSource source)
     {
+        ResetMergedBranchesCache();
         _selectionCancellationTokenSequence.CancelCurrent();
 
         base.OnUICommandsSourceSet(source);

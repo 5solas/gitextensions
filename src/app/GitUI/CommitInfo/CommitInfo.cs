@@ -214,6 +214,11 @@ public partial class CommitInfo : GitModuleControl
             return;
         }
 
+        if (_refsProvidedByHost)
+        {
+            _refsSource = null;
+        }
+
         // Cancel unconditionally: any in-flight load belongs to the previous repository.
         CancellationToken cancellationToken = _asyncLoadCancellation.Next();
         TriggerRefreshSortedTags();
@@ -235,6 +240,11 @@ public partial class CommitInfo : GitModuleControl
     private void TriggerRefreshSortedTags()
     {
         _tagsOrderDict = null;
+
+        if (_refsProvidedByHost && _refsSource is null)
+        {
+            return;
+        }
 
         if (!Module.IsValidGitWorkingDir())
         {
@@ -338,7 +348,7 @@ public partial class CommitInfo : GitModuleControl
     {
         try
         {
-            IDictionary<string, int> tagsOrderDict = GetSortedTags();
+            IDictionary<string, int> tagsOrderDict = GetSortedTagsOrFromRefs();
 
             await this.SwitchToMainThreadAsync();
             _tagsOrderDict = tagsOrderDict;
@@ -1075,6 +1085,11 @@ public partial class CommitInfo : GitModuleControl
         public RichTextBox RevisionInfo => _commitInfo.RevisionInfo;
 
         public IDictionary<string, int> GetSortedTags() => _commitInfo.GetSortedTags();
+        public IDictionary<string, int>? TryGetSortedTagsFromRefs(Func<RefsFilter, IReadOnlyList<IGitRef>> refsSource) => CommitInfo.TryGetSortedTagsFromRefs(refsSource);
+        public IDictionary<string, int>? TagsOrderDict => _commitInfo._tagsOrderDict;
+        public Task LoadSortedTagsAsync() => _commitInfo.LoadSortedTagsAsync();
+        public bool RefsProvidedByHost => _commitInfo._refsProvidedByHost;
+        public Func<RefsFilter, IReadOnlyList<IGitRef>>? RefsSource => _commitInfo._refsSource;
 
         public void LinkClicked(object sender, LinkClickedEventArgs e) => _commitInfo.LinkClicked(sender, e);
     }
