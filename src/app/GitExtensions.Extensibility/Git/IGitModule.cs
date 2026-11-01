@@ -179,7 +179,7 @@ public interface IGitModule
     IGitModule GetSubmodule(string? submoduleName);
 
     /// <summary>
-    /// Retrieves registered remotes by running <c>git remote show</c> command.
+    /// Retrieves registered remotes.
     /// </summary>
     /// <returns>Registered remotes.</returns>
     IReadOnlyList<string> GetRemoteNames();

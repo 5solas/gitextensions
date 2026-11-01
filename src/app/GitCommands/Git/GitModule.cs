@@ -265,7 +265,7 @@ public sealed partial class GitModule : IGitModule
             {
                 lock (_lock)
                 {
-                    field ??= new GitEncodingSettingsGetter(new EffectiveGitConfigSettings(GitExecutable));
+                    field ??= new GitEncodingSettingsGetter(new EffectiveGitConfigSettings(GitExecutable, ConfigSnapshotProvider));
                 }
             }
 
@@ -275,7 +275,7 @@ public sealed partial class GitModule : IGitModule
 
     private ISettingsValueGetter EffectiveGitConfigSettings => GitEncodingSettingsGetter.SettingsValueGetter;
 
-    private IGitConfigSettingsGetter LocalGitConfigSettings => field ??= new GitConfigSettings(GitExecutable, GitSettingLevel.Local);
+    private IGitConfigSettingsGetter LocalGitConfigSettings => field ??= new GitConfigSettings(GitExecutable, GitSettingLevel.Local, ConfigSnapshotProvider);
 
     // Encoding that let us read all bytes without replacing any char
     // It is using to read output of commands, which may consist of:
@@ -298,6 +298,7 @@ public sealed partial class GitModule : IGitModule
 
     public void InvalidateGitSettings()
     {
+        ConfigSnapshotProvider.Invalidate();
         EffectiveGitConfigSettings.Invalidate();
         LocalGitConfigSettings.Invalidate();
     }
@@ -2076,6 +2077,11 @@ public sealed partial class GitModule : IGitModule
 
     public IReadOnlyList<string> GetRemoteNames()
     {
+        if (TryGetRemoteNamesFromSnapshot(out IReadOnlyList<string>? remoteNames))
+        {
+            return remoteNames;
+        }
+
         return GitExecutable
             .Execute("remote")
             .StandardOutput
@@ -2085,6 +2091,11 @@ public sealed partial class GitModule : IGitModule
 
     public async Task<IReadOnlyList<Remote>> GetRemotesAsync()
     {
+        if (TryGetRemotesFromSnapshot(out IReadOnlyList<Remote>? remotes))
+        {
+            return remotes;
+        }
+
         ExecutionResult result = await GitExecutable.ExecuteAsync(new GitArgumentBuilder("remote") { "-v" }, throwOnErrorExit: false);
         ////TODO: Handle non-empty result.StandardError if not result.ExitedSuccessfully
         return result.ExitedSuccessfully
