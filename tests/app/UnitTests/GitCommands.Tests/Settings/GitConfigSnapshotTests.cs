@@ -285,4 +285,15 @@ public sealed class GitConfigSnapshotTests
         string updatedUserName = helper.Module.GetEffectiveSetting(SettingKeyString.UserName);
         updatedUserName.Should().Be("new_author_name");
     }
+
+    [Test]
+    public void GitConfigSnapshotProviderCache_GetOrAdd_should_cache_and_reuse_provider()
+    {
+        using GitModuleTestHelper helper = new();
+
+        GitConfigSnapshotProvider provider1 = GitConfigSnapshotProviderCache.GetOrAdd(helper.Module.GitExecutable);
+        GitConfigSnapshotProvider provider2 = GitConfigSnapshotProviderCache.GetOrAdd(helper.Module.GitExecutable);
+
+        provider1.Should().BeSameAs(provider2);
+    }
 }
