@@ -28,6 +28,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
     <PackageReference Include="JetBrains.Annotations" />
+    <PackageReference Include="LibGhostty.Net" />
   </ItemGroup>
 
   <ItemGroup>
