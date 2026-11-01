@@ -1,4 +1,6 @@
-# Git Extensions 저장소 열기 성능 실측 및 병목 분석 보고서 (W13)
+﻿# Git Extensions 저장소 열기 성능 실측 및 병목 분석 보고서 (W13)
+
+§10 에 개선 결과 추가(2026-11-01)
 
 ## 1. 개요 및 측정 환경
 
@@ -63,11 +65,11 @@ Git Extensions는 Git CLI 기반 래퍼 구조로 동작하며, 한 번의 저�
 | 순위 | 명령줄 (Arguments 패턴) | 평균 소요 (ms) | 회당 호출 수 | 스레드 | 주요 호출 위치 (소스 코드) | 열기 시점 호출 목적 및 영향 |
 |:---:|---|:---:|:---:|:---:|---|---|
 | **1** | `git log -z --pretty=format:... --max-count=100000 --all` | Git: **1,061.6**<br>GE: 230.8 | 1회 | BG | `RevisionReader.cs:303`<br>`RevisionGridControl.cs:1195` | 리비전 그래프의 전체 커밋 히스토리 스트리밍 로드. 대형 저장소에서 1초 이상 소요되는 최대 단일 병목. |
-| **2** | `git branch --format="%(refname)" -a --merged <HEAD>` | Git: **288.2**<br>GE: 84.7 | **3회** | BG | `GitModule.cs:2088`<br>`CommitInfo.cs:587` | 선택된 HEAD 커밋이 머지된 브랜치 목록 계산. **단일 열기 중에 동일 파라미터로 3회 중복 실행됨.** |
+| **2** | `git branch --format="%(refname)" -a --merged <HEAD>` | Git: **288.2**<br>GE: 84.7 | **3회** | BG | `RepoObjectsTree.SelectionChanged`<br>(`src/app/GitUI/LeftPanel/RepoObjectsTree.cs`) | 선택된 HEAD 커밋이 머지된 브랜치 목록 계산. 호출자는 CommitInfo가 아니라 `RepoObjectsTree.SelectionChanged`이며, `FormBrowse.RefreshSelection`이 그리드 선택 변경과 하단 탭 전환마다 호출해서 반복됨(측정 하네스가 Diff 탭 → CommitInfo 탭으로 전환하며 2회 추가). |
 | **3** | `git tag --contains <HEAD>` | Git: **507.9**<br>GE: 86.1 | 1회 | BG | `GitModule.cs:2244`<br>`CommitInfo.cs:577` | 선택 커밋을 포함하는 태그 검색. 대형 저장소(태그 1,000개 이상)에서 500ms 이상 소비. |
 | **4** | `git status --porcelain=2 -z --untracked-files` | Git: **412.4**<br>GE: 224.6 | 1회 | BG | `GitStatusMonitor.cs:422`<br>`GitModule.cs:2726` | 작업 트리 변경 상태 및 Index 변경 카운트 산출. 인덱스 전체 스캔 발생. |
 | **5** | `git remote` (인자 없음) | **90.0** | **3회** | **UI(2) / BG(1)** | `RevisionGridControl.cs:988`<br>`FormBrowse.cs:954`<br>`RepoObjectsTree.cs` | 원격 저장소 이름 목록 조회. **UI 스레드에서만 2회 동기 호출되어 ~180ms 동안 UI를 동결시킴.** |
-| **6** | `git branch --contains <HEAD>` | Git: 93.4<br>GE: 104.0 | 1회 | BG | `CommitInfo.cs:587` | 선택 커밋을 포함하는 로컬/원격 브랜치 검색. |
+| **6** | `git branch --contains <HEAD>` | Git: 93.4<br>GE: 104.0 | 1회 | BG | `CommitInfo.cs:587` | 선택 커밋을 포함하는 로컬/원격 브랜치 검색 (호출자는 CommitInfo가 맞음). |
 | **7** | `git ls-files -z --unmerged` | **80.2** | **2회** | **UI (전체)** | `FormBrowse.cs:1192`<br>`FormBrowse.Activated` | 충돌(Unmerged) 파일 존재 여부 검사. **창 활성화(OnActivated) 때마다 UI 스레드에서 무조건 동기 실행.** |
 | **8** | `git for-each-ref --sort="-taggerdate" refs/tags/` | 97.0 | 1회 | BG | `CommitInfo.cs:235` | 태그 정렬 목록 로드. |
 | **9** | `git worktree list --porcelain -z` | 94.0 | 1회 | BG | `RepoObjectsTree.cs:412` | 워크트리 트리 노드 구성을 위한 워크트리 목록 조회. |
@@ -94,8 +96,12 @@ Git Extensions는 Git CLI 기반 래퍼 구조로 동작하며, 한 번의 저�
   - 사용자가 다른 창으로 전환했다가 Git Extensions로 돌아올 때마다(Alt+Tab 등) UI 스레드에서 80ms짜리 `git ls-files`가 무조건 동기로 실행되어 버벅임(Stutter)을 유발함.
 
 ### 4.3 `git branch --merged <HEAD>` 3회 중복 호출
-- **원인 코드 위치**: `CommitInfo.cs`의 비동기 로더들 (`StartAsyncDataLoad`).
-- **문제점**: 선택된 커밋에 대해 브랜치 포함 관계 및 병합 관계를 질의하는 과정에서 `CommitInfo` 내부의 여러 위젯과 상태 검사 루틴이 동일한 GitModule 메서드를 독립 태스크로 호출함. 대형 저장소인 git.git에서는 이 명령 1회당 288ms가 걸리므로, 3회 중복 실행 시 864ms의 백그라운드 연산 리소스를 낭비함.
+- **원인 코드 위치**: `RepoObjectsTree.SelectionChanged` (`src/app/GitUI/LeftPanel/RepoObjectsTree.cs`).
+- **문제점**:
+  - 기존 보고서에서는 CommitInfo를 원인으로 추정했으나, `git branch --format=%(refname) -a --merged <sha>` 3회의 실제 호출자는 CommitInfo가 아니라 **`RepoObjectsTree.SelectionChanged`**(`src/app/GitUI/LeftPanel/RepoObjectsTree.cs`)임이 확인되었습니다. (`git branch --contains`의 호출자는 CommitInfo가 맞습니다.)
+  - `FormBrowse.RefreshSelection`이 그리드 선택 변경과 **하단 탭 전환마다** 호출되어 `RepoObjectsTree.SelectionChanged`를 불필요하게 반복 트리거했습니다.
+  - 특히 측정 하네스가 Diff 탭에서 CommitInfo 탭으로 전환하며 2회가 추가되어 단일 열기 중 총 3회가 반복 실행되었습니다.
+  - 대형 저장소인 git/git에서는 이 명령 1회당 288ms가 걸리므로, 3회 중복 실행 시 864ms의 백그라운드 연산 리소스를 낭비하게 됩니다.
 
 ### 4.4 `git config list`의 Scope별 순차 호출
 - **원인 코드 위치**: `GitModule.cs:278`, `ConfigFileRemoteSettingsManager.cs:190`.
@@ -212,3 +218,41 @@ Git Extensions의 CLI 래핑 아키텍처에 네이티브 인프로세스 라이
    - `CommitInfo` 텍스트 박스 채움 완료 감지는 리비전 로드 후 2초 유휴 시간 대기 휴리스틱을 병행 적용하였습니다. 실제로는 백그라운드 태스크가 수백 밀리초 일찍 끝났을 수 있으며, 이는 보고서의 CommitInfo 완료 타임스탬프에 100~200ms 수준의 측정 여유분이 포함되었음을 의미합니다.
 4. **네트워크 원격 저장소 상호작용 배제**:
    - 측정 중 `git fetch`나 원격 LFS 상태 조회는 수행되지 않았습니다. 원격 네트워크 지연이 개입되는 환경에서는 백그라운드 스레드 점유 시간이 본 실측치보다 훨씬 길어질 수 있습니다.
+
+---
+
+## 10. 개선 적용 결과 (feature/perf-repo-open)
+
+### 10.1 측정 기준
+- **측정 기준**: `FormBrowseGitProcessBudgetTests`
+- **저장소 조건**: 작은 저장소 (브랜치 2, 리모트 1, 태그 2)
+- **시나리오**: 열기 → HEAD 선택 → CommitInfo 탭 → Diff 탭
+
+### 10.2 단계별 결과 (전체 git 프로세스 / UI 스레드)
+- **기준선**: 29 / 10
+- **refs · 선택 개선**: 25 / 10 (좌측 패널 merged 중복 제거, 정렬 태그를 메인 refs 에서, ahead/behind 경쟁 수정)
+- **config 1회 로드 · 리모트를 config 에서**: 19 / 7
+- **공통 디렉터리 파일 해석 · 충돌 캐시 · 스태시 없을 때 stash list 생략**: 17 / 4
+- **업스트림 반영 후**: 16 / 4 (업스트림 `perf(left panel): paint before TreeView is filled` 반영)
+
+### 10.3 남은 UI 스레드 호출 (4개)
+진행 중인 후속 작업(W20, W23)으로 표시된 남은 UI 스레드 동기 호출 4개:
+1. **config 두 번째 로드** (진행 중인 후속 작업: W20)
+2. **`stash list`** (스태시가 있을 때만, 진행 중인 후속 작업: W23)
+3. **Diff 뷰어의 `ls-tree`** (진행 중인 후속 작업: W20)
+4. **Diff 뷰어의 `check-attr`** (진행 중인 후속 작업: W20)
+
+### 10.4 설계 원칙
+- **동작 동등성 및 폴백**: 동작 동등성이 증명되지 않으면 기존 git 호출로 폴백
+  - `url.*.insteadOf` / `pushInsteadOf` 또는 레거시 리모트(`.git/remotes`, `.git/branches`) 설정 시 → `git remote -v`
+  - `commondir` 해석 실패 시 → `rev-parse` (`git rev-parse --git-common-dir`)
+- **머지 친화적 구조**: 업스트림 파일에는 훅만 추가하여 머지 친화 유지
+
+### 10.5 보류 항목
+- **`branch --contains` + `tag --contains` 병합**: commit-graph 없을 때 느려짐
+- **`%(ahead-behind:)`**: git 2.41+ 필요
+- **첫 git 호출 전 0.6~1.6초 .NET 구간 프로파일링**: 후속 프로파일링 과제로 보류
+
+### 10.6 운영상 발견
+- **테스트 인프라 머신 전역 세마포어**: `GitExtensionsTestAssemblySerializer`
+- **testhost 종료 문제**: 이 머신에서 `--blame-hang-timeout` 이 testhost 를 끝내지 못함
