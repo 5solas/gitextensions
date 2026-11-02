@@ -1,5 +1,6 @@
 ﻿using GitCommands;
 using GitExtUtils;
+using GitUI.CommandsDialogs;
 using GitUI.CommandsDialogs.BrowseDialog;
 using GitUI.Infrastructure;
 using GitUI.Shells;
@@ -77,10 +78,11 @@ internal partial class ToolsToolStripMenuItem : ToolStripMenuItemEx
     {
         string translation = AppSettings.Translation;
         CommitInfoPosition commitInfoPosition = AppSettings.CommitInfoPosition;
+        FormBrowse.ConsoleSettingsSnapshot consoleSettings = FormBrowse.CaptureConsoleSettings();
 
         UICommands.StartSettingsDialog(OwnerForm);
 
-        SettingsChanged?.Invoke(sender, new(translation, commitInfoPosition));
+        SettingsChanged?.Invoke(sender, new(translation, commitInfoPosition, consoleSettings));
     }
 
     private void gitBashToolStripMenuItem_Click(object sender, EventArgs e)
