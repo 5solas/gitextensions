@@ -18,9 +18,16 @@ public class FormBrowseGitProcessBudgetTests
 {
     // Budgets for opening a repository and selecting HEAD. Only ever lower these numbers;
     // a failure means a change added git processes (or moved one onto the UI thread).
-    private const int MaxUiThreadGitProcesses = 10;
-    private const int MaxGitProcessesOnOpen = 29;
-    private const int MaxProcessesPerCommand = 4;
+    // Without stashes no git process may run on the UI thread. With stashes 'git stash list' is
+    // still read on the UI thread (moving it off caused a selection race; see the perf notes).
+    private const int MaxUiThreadGitProcessesWithoutStash = 0;
+    private const int MaxUiThreadGitProcessesWithStash = 1;
+    // Measured 15-16 / 16-17: one background call depends on timing, hence one process of headroom.
+    private const int MaxGitProcessesWithoutStash = 16;
+    private const int MaxGitProcessesWithStash = 17;
+
+    // 'git status' legitimately runs twice: once for the status monitor and once for the worktree diff.
+    private const int MaxProcessesPerCommand = 2;
 
     private const int StepTimeoutMilliseconds = 30_000;
     private const int IdleSettleMilliseconds = 500;
@@ -141,7 +148,10 @@ public class FormBrowseGitProcessBudgetTests
             });
 
         recordedCommands.Should().NotBeNull("CommandLog snapshot should have been captured before form closed");
-        AssertGitProcessBudget(recordedCommands!);
+        AssertGitProcessBudget(
+            recordedCommands!,
+            hasStash ? MaxUiThreadGitProcessesWithStash : MaxUiThreadGitProcessesWithoutStash,
+            hasStash ? MaxGitProcessesWithStash : MaxGitProcessesWithoutStash);
     }
 
     private static bool IsGitCommand(CommandLogEntry entry)
@@ -180,7 +190,7 @@ public class FormBrowseGitProcessBudgetTests
         return referenceRepository;
     }
 
-    private static void AssertGitProcessBudget(IReadOnlyList<CommandLogEntry> commands)
+    private static void AssertGitProcessBudget(IReadOnlyList<CommandLogEntry> commands, int maxUiThreadGitProcesses, int maxGitProcesses)
     {
         int totalProcesses = commands.Count;
         int uiThreadProcesses = commands.Count(c => c.IsOnMainThread);
@@ -199,12 +209,12 @@ public class FormBrowseGitProcessBudgetTests
         }
 
         uiThreadProcesses.Should().BeLessThanOrEqualTo(
-            MaxUiThreadGitProcesses,
-            $"UI thread git process count exceeded budget ({uiThreadProcesses} > {MaxUiThreadGitProcesses}).\n{FormatCommandLog(commands)}");
+            maxUiThreadGitProcesses,
+            $"UI thread git process count exceeded budget ({uiThreadProcesses} > {maxUiThreadGitProcesses}).\n{FormatCommandLog(commands)}");
 
         totalProcesses.Should().BeLessThanOrEqualTo(
-            MaxGitProcessesOnOpen,
-            $"Total git process count exceeded budget ({totalProcesses} > {MaxGitProcessesOnOpen}).\n{FormatCommandLog(commands)}");
+            maxGitProcesses,
+            $"Total git process count exceeded budget ({totalProcesses} > {maxGitProcesses}).\n{FormatCommandLog(commands)}");
     }
 
     private static string FormatCommandLog(IReadOnlyList<CommandLogEntry> commands)
