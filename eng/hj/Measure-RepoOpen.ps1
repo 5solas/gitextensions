@@ -17,6 +17,10 @@ if (-not $PerfOutputDir) {
     $PerfOutputDir = Join-Path $worktreeRoot "docs\hj\perf"
 }
 
+if (-not [System.IO.Path]::IsPathRooted($PerfOutputDir)) {
+    $PerfOutputDir = Join-Path $worktreeRoot $PerfOutputDir
+}
+
 if (-not (Test-Path $PerfOutputDir)) {
     New-Item -ItemType Directory -Path $PerfOutputDir -Force | Out-Null
 }
@@ -89,13 +93,50 @@ if ($LASTEXITCODE -ne 0) {
 $env:HJ_PERF_REPO = ($targetRepos -join ";")
 $env:HJ_PERF_ITERATIONS = $Iterations.ToString()
 $env:HJ_PERF_OUTPUT_DIR = (Resolve-Path $PerfOutputDir).Path
+$env:GIT_EDITOR = "true"
+$env:GIT_TERMINAL_PROMPT = "0"
 
 Write-Host "Starting RepositoryOpenPerfTests via dotnet test..." -ForegroundColor Yellow
 
 $testProj = Join-Path $worktreeRoot "tests\app\IntegrationTests\UI.IntegrationTests\UI.IntegrationTests.csproj"
-dotnet test $testProj --filter "FullyQualifiedName~RepositoryOpenPerfTests" --logger "trx" --blame-hang-timeout 15m
+$resultsDir = Join-Path $worktreeRoot "artifacts\Debug\TestsResults"
+if (-not (Test-Path $resultsDir)) {
+    New-Item -ItemType Directory -Path $resultsDir -Force | Out-Null
+}
 
-$testExitCode = $LASTEXITCODE
+$trxFileName = "RepositoryOpenPerfTests_$([DateTime]::Now.ToString('yyyyMMdd_HHmmss')).trx"
+$testOutFile = Join-Path $resultsDir "RepositoryOpenPerfTests_output.txt"
+
+$argList = @(
+    'test',
+    $testProj,
+    '--no-build',
+    '--filter', 'FullyQualifiedName~RepositoryOpenPerfTests',
+    '--blame-crash',
+    '--blame-crash-dump-type', 'mini',
+    '--blame-hang-timeout', '10m',
+    '--logger', "trx;LogFileName=$trxFileName"
+)
+
+$p = Start-Process -FilePath "dotnet" -ArgumentList $argList -NoNewWindow -PassThru -RedirectStandardOutput $testOutFile
+if (-not $p.WaitForExit(600000)) {
+    Write-Warning "RepositoryOpenPerfTests timed out after 10m. Terminating testhost/dotnet process tree..."
+    # Only this run's process tree; other worktrees may be running tests too.
+    Get-CimInstance Win32_Process -Filter "ParentProcessId = $($p.Id)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+}
+
+$testExitCode = $p.ExitCode
+$trxPath = Join-Path $resultsDir $trxFileName
+if (Test-Path $trxPath) {
+    [xml]$trx = Get-Content $trxPath
+    $counters = $trx.TestRun.ResultSummary.Counters
+    Write-Host "Test Results: Total=$($counters.total), Passed=$($counters.passed), Failed=$($counters.failed)" -ForegroundColor Cyan
+    if ([int]$counters.failed -gt 0 -or [int]$counters.passed -eq 0) {
+        $testExitCode = 1
+    }
+}
+
 $statusColor = if ($testExitCode -eq 0) { "Green" } else { "Red" }; Write-Host "dotnet test completed with exit code: $testExitCode" -ForegroundColor $statusColor
 
 # 4. Summarize results
