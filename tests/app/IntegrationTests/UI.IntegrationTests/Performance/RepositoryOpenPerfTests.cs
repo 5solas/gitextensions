@@ -155,13 +155,13 @@ public sealed class RepositoryOpenPerfTests
                 runStartTime = DateTime.Now;
                 commands.StartBrowseDialog(owner: null).Should().BeTrue();
             },
-            runTestAsync: form =>
+            runTestAsync: async form =>
             {
                 // RevisionsLoading might already have started
                 revisionsLoadingMs = 0;
 
                 // 1. Wait for revisions loaded / first batch
-                bool revisionsLoaded = WaitStep(
+                bool revisionsLoaded = await WaitStepAsync(
                     "revisions loaded",
                     () =>
                     {
@@ -195,7 +195,7 @@ public sealed class RepositoryOpenPerfTests
                 }
 
                 // 2. Wait for left panel
-                bool leftPanelLoaded = WaitStep(
+                bool leftPanelLoaded = await WaitStepAsync(
                     "left panel",
                     () => IsLeftPanelLoaded(form.GetTestAccessor().RepoObjectsTree),
                     15_000);
@@ -214,7 +214,7 @@ public sealed class RepositoryOpenPerfTests
                 }
 
                 // 4. Wait for diff list
-                bool diffLoaded = WaitStep(
+                bool diffLoaded = await WaitStepAsync(
                     "diff list",
                     () =>
                     {
@@ -236,7 +236,7 @@ public sealed class RepositoryOpenPerfTests
 
                 // 5. Activate CommitInfoTabPage and wait for commit info (max 2 seconds, then process events)
                 form.GetTestAccessor().CommitInfoTabControl.SelectedTab = form.GetTestAccessor().CommitInfoTabPage;
-                bool commitInfoLoaded = WaitStep(
+                bool commitInfoLoaded = await WaitStepAsync(
                     "commit info",
                     () => IsCommitInfoLoaded(form.GetTestAccessor().RevisionInfo),
                     2_000);
@@ -253,7 +253,6 @@ public sealed class RepositoryOpenPerfTests
                 }
 
                 sw.Stop();
-                return Task.CompletedTask;
             });
 
         result.RevisionsLoadingMs = revisionsLoadingMs;
@@ -303,7 +302,7 @@ public sealed class RepositoryOpenPerfTests
         return result;
     }
 
-    private static bool WaitStep(string stepName, Func<bool> condition, int maxMilliseconds)
+    private static async Task<bool> WaitStepAsync(string stepName, Func<bool> condition, int maxMilliseconds)
     {
         const int delayMs = 25;
         int maxIterations = (maxMilliseconds + delayMs - 1) / delayMs;
@@ -319,14 +318,14 @@ public sealed class RepositoryOpenPerfTests
             }
             catch (Exception ex)
             {
-                TestContext.Out.WriteLine($"  [Notice] Exception in '{stepName}': {ex.Message}");
+                await TestContext.Out.WriteLineAsync($"  [Notice] Exception in '{stepName}': {ex.Message}");
             }
 
             Application.DoEvents();
-            Thread.Sleep(delayMs);
+            await Task.Delay(delayMs);
         }
 
-        TestContext.Out.WriteLine($"  [Timeout] '{stepName}' timed out after {maxMilliseconds}ms");
+        await TestContext.Out.WriteLineAsync($"  [Timeout] '{stepName}' timed out after {maxMilliseconds}ms");
         return false;
     }
 
