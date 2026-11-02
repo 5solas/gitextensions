@@ -88,6 +88,7 @@ if ($LASTEXITCODE -ne 0) {
 # 3. Set environment variables and execute harness
 $env:HJ_PERF_REPO = ($targetRepos -join ";")
 $env:HJ_PERF_ITERATIONS = $Iterations.ToString()
+$env:HJ_PERF_OUTPUT_DIR = (Resolve-Path $PerfOutputDir).Path
 
 Write-Host "Starting RepositoryOpenPerfTests via dotnet test..." -ForegroundColor Yellow
 
