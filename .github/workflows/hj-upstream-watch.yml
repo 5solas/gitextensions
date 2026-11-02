@@ -1,0 +1,121 @@
+name: hj-upstream-watch
+
+on:
+  schedule:
+    # Daily run at 03:17 UTC (picked a minute not :00 to avoid runner load spikes)
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: 'Simulate an older base ref for origin/master (e.g. upstream/master~5)'
+        required: false
+        type: string
+        default: ''
+      check_build:
+        description: 'Run dotnet build check on merged tree'
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: hj-upstream-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  watch:
+    name: Upstream change & patch stack check
+    if: github.repository_owner == '5solas' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          global-json-file: global.json
+
+      - name: Configure Git and remotes
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config rerere.enabled true
+          git config merge.conflictstyle zdiff3
+
+          # Ensure upstream remote exists and fetch it
+          $upstreamUrl = "https://github.com/gitextensions/gitextensions.git"
+          if (-not (git remote | Select-String -Pattern '^upstream$')) {
+            git remote add upstream $upstreamUrl
+          } else {
+            git remote set-url upstream $upstreamUrl
+          }
+          Write-Host "Fetching upstream remote..." -ForegroundColor Cyan
+          git fetch upstream --prune --tags
+
+          Write-Host "Fetching origin remote..." -ForegroundColor Cyan
+          git fetch origin --prune
+
+          # Ensure local branches exist for master, topics, hj/infra, hj/main
+          $branches = @('master', 'hj/infra', 'hj/main')
+          $topicFileContent = & git show "origin/hj/infra:eng/hj/topics.txt" 2>$null
+          if (-not $topicFileContent -and (Test-Path "eng/hj/topics.txt")) {
+            $topicFileContent = Get-Content "eng/hj/topics.txt"
+          }
+          if ($topicFileContent) {
+            foreach ($line in ($topicFileContent -split "`r?`n")) {
+              $t = $line.Trim()
+              if ($t -and -not $t.StartsWith('#')) {
+                $branches += $t
+              }
+            }
+          }
+          # Detach HEAD so the checked-out branch (hj/main) can be force-updated below
+          git checkout --detach
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          foreach ($b in ($branches | Select-Object -Unique)) {
+            if (git rev-parse --verify "refs/remotes/origin/$b" 2>$null) {
+              git branch -f $b "origin/$b"
+              if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create local branch '$b'"; exit 1 }
+              Write-Host "Created/updated local branch '$b' from 'origin/$b'"
+            }
+          }
+          exit 0
+
+      - name: Run Upstream Watcher
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $watchArgs = @()
+
+          # Optional base ref override for simulation / debugging
+          $simBaseRef = "${{ inputs.base_ref }}".Trim()
+          if ($simBaseRef) {
+            $watchArgs += @('-BaseRef', $simBaseRef)
+          }
+
+          # Build check flag (default true, unless explicitly disabled in workflow_dispatch)
+          $shouldBuild = if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            '${{ inputs.check_build }}' -ne 'false'
+          } else {
+            $true
+          }
+          if ($shouldBuild) {
+            $watchArgs += @('-CheckBuild')
+          }
+
+          & pwsh eng/hj/Watch-Upstream.ps1 @watchArgs
