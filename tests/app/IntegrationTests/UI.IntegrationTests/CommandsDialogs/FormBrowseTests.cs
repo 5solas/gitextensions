@@ -1,9 +1,11 @@
 ﻿using System.Runtime.CompilerServices;
 using CommonTestUtils;
 using GitCommands;
+using GitCommands.Logging;
 using GitExtensions.Extensibility.Git;
 using GitUI;
 using GitUI.CommandsDialogs;
+using GitUIPluginInterfaces;
 
 namespace GitExtensions.UITests.CommandsDialogs;
 
@@ -342,6 +344,58 @@ public class FormBrowseTests
     }
 
     [Test]
+    public void Stashes_should_be_visible_in_grid_and_left_panel_when_repository_has_stash()
+    {
+        using ReferenceRepository referenceRepository = new();
+        GitUICommands commands = new(GlobalServiceContainer.CreateDefaultMockServiceContainer(), referenceRepository.Module);
+
+        referenceRepository.CreateCommit("Commit1");
+        referenceRepository.Stash("Stash1");
+
+        bool showStashes = AppSettings.ShowStashes;
+        bool repoObjectsTreeShowStashes = AppSettings.RepoObjectsTreeShowStashes;
+
+        AppSettings.ShowStashes = true;
+        AppSettings.RepoObjectsTreeShowStashes = true;
+
+        RunFormTest(
+            form =>
+            {
+                try
+                {
+                    WaitForRevisionsToBeLoaded(form);
+
+                    // Verify stash is visible in revision grid
+                    form.GetTestAccessor().RevisionGrid.GetTestAccessor().VisibleRevisionCount.Should().BeGreaterThan(1);
+
+                    // Verify stash is visible in left panel
+                    UITest.ProcessUntil(
+                        "waiting for stash node in left panel",
+                        () =>
+                        {
+                            TreeNode? stashesRoot = form.GetTestAccessor().RepoObjectsTree.GetTestAccessor().TreeView.Nodes
+                                .Find(TranslatedStrings.Stashes, searchAllChildren: true)
+                                .FirstOrDefault();
+                            return stashesRoot is not null && stashesRoot.Nodes.Count > 0;
+                        });
+
+                    TreeNode? stashRootNode = form.GetTestAccessor().RepoObjectsTree.GetTestAccessor().TreeView.Nodes
+                        .Find(TranslatedStrings.Stashes, searchAllChildren: true)
+                        .FirstOrDefault();
+                    stashRootNode.Should().NotBeNull();
+                    stashRootNode!.Nodes.Count.Should().Be(1);
+                    stashRootNode.Nodes[0].Text.Should().Contain("Stash1");
+                }
+                finally
+                {
+                    AppSettings.ShowStashes = showStashes;
+                    AppSettings.RepoObjectsTreeShowStashes = repoObjectsTreeShowStashes;
+                }
+            },
+            commands);
+    }
+
+    [Test]
     public void SetWorkingDir_should_reload_commit_info_for_auto_selected_revision_after_repository_switch()
     {
         using (CommitInfoPanelTestSettingsScope.ForBrowseRepositorySwitch())
@@ -369,6 +423,59 @@ public class FormBrowseTests
                     WaitForCommitMessageAfterRepositorySwitch(form, "REPO_B_HEAD", "REPO_A_HEAD");
                 },
                 commandsA);
+        }
+    }
+
+    [Test]
+    public void FormBrowse_process_budget_should_not_spawn_duplicate_git_processes_during_tab_switching()
+    {
+        using (CommitInfoPanelTestSettingsScope.ForBrowseRepositorySwitch())
+        {
+            using GitModuleTestHelper repo = new("formBrowseProcessBudget");
+            CreateCommitWithSubject(repo, "HEAD commit for budget test");
+
+            GitUICommands commands = new(GlobalServiceContainer.CreateDefaultMockServiceContainer(), repo.Module);
+
+            CommandLog.Clear();
+
+            RunFormTest(
+                form =>
+                {
+                    FormBrowse.TestAccessor ta = form.GetTestAccessor();
+
+                    WaitForRevisionsToBeLoaded(form);
+
+                    // 1. CommitInfo tab
+                    ta.CommitInfoTabControl.SelectedTab = ta.CommitInfoTabPage;
+                    UITest.ProcessUntil("commit info loaded", () => ta.RevisionInfo.GetTestAccessor().CommitMessage.Text.Contains("HEAD commit for budget test", StringComparison.Ordinal), maxMilliseconds: 5000);
+
+                    // 2. Diff tab
+                    ta.CommitInfoTabControl.SelectedTab = ta.DiffTabPage;
+                    UITest.ProcessUntil("diff tab selected", () => ta.CommitInfoTabControl.SelectedTab == ta.DiffTabPage, maxMilliseconds: 2000);
+
+                    // 3. CommitInfo tab
+                    ta.CommitInfoTabControl.SelectedTab = ta.CommitInfoTabPage;
+                    UITest.ProcessUntil("commit info selected again", () => ta.CommitInfoTabControl.SelectedTab == ta.CommitInfoTabPage, maxMilliseconds: 2000);
+
+                    List<CommandLogEntry> commandList = CommandLog.Commands.ToList();
+
+                    // 1. branch ... --merged: 1 count
+                    int mergedBranchCount = commandList.Count(c => c.Arguments.Contains("branch") && c.Arguments.Contains("--merged"));
+                    mergedBranchCount.Should().Be(1, "branch --merged should be called exactly once");
+
+                    // 2. for-each-ref --sort=-taggerdate: 0 count
+                    int sortedTagsCount = commandList.Count(c => c.Arguments.Contains("for-each-ref") && c.Arguments.Contains("-taggerdate"));
+                    sortedTagsCount.Should().Be(0, "for-each-ref --sort=-taggerdate should not be called (CommitInfo uses host refs)");
+
+                    // 3. ahead/behind for-each-ref ... refs/heads/: 1 count
+                    int aheadBehindCount = commandList.Count(c => c.Arguments.Contains("for-each-ref") && c.Arguments.Contains("refs/heads/"));
+                    aheadBehindCount.Should().Be(1, "ahead/behind for-each-ref refs/heads/ should be called exactly once");
+
+                    // 4. for-each-ref all refs: 1 count
+                    int allRefsCount = commandList.Count(c => c.Arguments.Contains("for-each-ref") && !c.Arguments.Contains("refs/heads/") && !c.Arguments.Contains("-taggerdate"));
+                    allRefsCount.Should().Be(1, "for-each-ref for all refs should be called exactly once");
+                },
+                commands);
         }
     }
 

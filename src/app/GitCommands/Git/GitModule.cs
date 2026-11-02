@@ -265,7 +265,7 @@ public sealed partial class GitModule : IGitModule
             {
                 lock (_lock)
                 {
-                    field ??= new GitEncodingSettingsGetter(new EffectiveGitConfigSettings(GitExecutable));
+                    field ??= new GitEncodingSettingsGetter(new EffectiveGitConfigSettings(GitExecutable, ConfigSnapshotProvider));
                 }
             }
 
@@ -275,7 +275,7 @@ public sealed partial class GitModule : IGitModule
 
     private ISettingsValueGetter EffectiveGitConfigSettings => GitEncodingSettingsGetter.SettingsValueGetter;
 
-    private IGitConfigSettingsGetter LocalGitConfigSettings => field ??= new GitConfigSettings(GitExecutable, GitSettingLevel.Local);
+    private IGitConfigSettingsGetter LocalGitConfigSettings => field ??= new GitConfigSettings(GitExecutable, GitSettingLevel.Local, ConfigSnapshotProvider);
 
     // Encoding that let us read all bytes without replacing any char
     // It is using to read output of commands, which may consist of:
@@ -298,6 +298,7 @@ public sealed partial class GitModule : IGitModule
 
     public void InvalidateGitSettings()
     {
+        ConfigSnapshotProvider.Invalidate();
         EffectiveGitConfigSettings.Invalidate();
         LocalGitConfigSettings.Invalidate();
     }
@@ -384,6 +385,8 @@ public sealed partial class GitModule : IGitModule
 
             lock (_gitCommonLock)
             {
+                _gitCommonDirectory ??= TryResolveGitCommonDirectoryFromFiles();
+
                 if (_gitCommonDirectory is null)
                 {
                     GitArgumentBuilder args = new("rev-parse") { "--git-common-dir" };
@@ -511,6 +514,11 @@ public sealed partial class GitModule : IGitModule
 
     public bool InTheMiddleOfConflictedMerge(bool throwOnErrorExit = true)
     {
+        if (TryGetCachedConflictedMerge() is bool cached)
+        {
+            return cached;
+        }
+
         GitArgumentBuilder args = new("ls-files")
         {
             "-z",
@@ -519,7 +527,7 @@ public sealed partial class GitModule : IGitModule
 
         // Do not report errors for commands called in the background
         ExecutionResult result = GitExecutable.Execute(args, throwOnErrorExit: throwOnErrorExit);
-        return result.ExitedSuccessfully && !string.IsNullOrEmpty(result.StandardOutput);
+        return CacheAndReturnConflictedMerge(result);
     }
 
     public bool HandleConflictSelectSide(string fileName, string side, out string errorMessage)
@@ -996,6 +1004,7 @@ public sealed partial class GitModule : IGitModule
         // This means that the WSL path is presented in WSL repos, not the Windows path (native to the app).
         string output = GitExecutable.GetOutput(args);
 
+        _gitCommonDirectory = null;
         WorkingDirGitDir = _executor.GetGitDirectory();
         return output;
     }
@@ -2076,6 +2085,11 @@ public sealed partial class GitModule : IGitModule
 
     public IReadOnlyList<string> GetRemoteNames()
     {
+        if (TryGetRemoteNamesFromSnapshot(out IReadOnlyList<string>? remoteNames))
+        {
+            return remoteNames;
+        }
+
         return GitExecutable
             .Execute("remote")
             .StandardOutput
@@ -2085,6 +2099,11 @@ public sealed partial class GitModule : IGitModule
 
     public async Task<IReadOnlyList<Remote>> GetRemotesAsync()
     {
+        if (TryGetRemotesFromSnapshot(out IReadOnlyList<Remote>? remotes))
+        {
+            return remotes;
+        }
+
         ExecutionResult result = await GitExecutable.ExecuteAsync(new GitArgumentBuilder("remote") { "-v" }, throwOnErrorExit: false);
         ////TODO: Handle non-empty result.StandardError if not result.ExitedSuccessfully
         return result.ExitedSuccessfully
@@ -3109,10 +3128,10 @@ public sealed partial class GitModule : IGitModule
 
         foreach (Match match in matches)
         {
-            string refName = match.Groups["refname"].Value;
+            (string refName, DateTimeOffset? taggerDate) = ParseRefNameAndTaggerDate(match.Groups["refname"].Value);
             ObjectId objectId = ObjectId.Parse(refList, match.Groups["objectid"]);
             string remoteName = GitRefName.GetRemoteName(refName);
-            GitRef head = new(this, objectId, refName, remoteName);
+            GitRef head = new(this, objectId, refName, remoteName, taggerDate);
 
             if (GitRefName.IsRemoteHead(refName))
             {

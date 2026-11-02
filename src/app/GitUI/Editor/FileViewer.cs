@@ -714,8 +714,18 @@ public partial class FileViewer : GitModuleControl
         FileStatusItem? item,
         int? line,
         Action? openWithDifftool,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowBackgroundFetch = true)
     {
+        if (allowBackgroundFetch
+            && ThreadHelper.JoinableTaskContext.IsOnMainThread
+            && file.TreeId.IsZero
+            && !objectId.IsZeroOrArtificial
+            && !TryGetCachedTreeId(Module.WorkingDir, objectId, file.Name, out _, out _))
+        {
+            return ViewGitItemBackgroundAsync(file, objectId, item, line, openWithDifftool, cancellationToken);
+        }
+
         // set fields possibly not set from git-diff (etc); treeGuid and IsSubmodule.
         // (git-status does not report submodule, IsSubmodule is not set if not TreeId is)
         // treeId (blobId) is only recalculated if required.
@@ -1297,7 +1307,11 @@ public partial class FileViewer : GitModuleControl
         else
         {
             return _async.LoadAsync(
-                getFileText,
+                () =>
+                {
+                    FileHelper.PreloadGitAttributes(Module, fileName);
+                    return getFileText();
+                },
                 text => ThreadHelper.JoinableTaskFactory.Run(() => ViewTextAsync(fileName, text, item, line, openWithDifftool, checkGitAttributes: true, cancellationToken: cancellationToken)));
         }
     }
@@ -1613,9 +1627,17 @@ public partial class FileViewer : GitModuleControl
         ObjectId commitId,
         CancellationToken cancellationToken = default)
     {
+        if (TryGetCachedTreeId(Module.WorkingDir, commitId, file.Name, out ObjectId cachedTreeId, out bool cachedIsSubmodule))
+        {
+            file.IsSubmodule = cachedIsSubmodule;
+            file.TreeId = cachedTreeId;
+            return commitId == ObjectId.WorkTreeId ? default : file.TreeId;
+        }
+
         if (!file.TreeId.IsZero && !commitId.IsArtificial)
         {
             // current value is immutable (and IsSubmodule should have been set)
+            CacheTreeId(Module.WorkingDir, commitId, file.Name, file.TreeId, file.IsSubmodule);
             return file.TreeId;
         }
 
@@ -1631,6 +1653,7 @@ public partial class FileViewer : GitModuleControl
         if (!enumerator.MoveNext())
         {
             // file not found in tree
+            CacheTreeId(Module.WorkingDir, commitId, file.Name, default, false);
             return default;
         }
 
@@ -1638,11 +1661,13 @@ public partial class FileViewer : GitModuleControl
         if (enumerator.MoveNext())
         {
             // more than one item found
+            CacheTreeId(Module.WorkingDir, commitId, file.Name, default, false);
             return default;
         }
 
         file.IsSubmodule = gitItem.ObjectType == GitObjectType.Commit;
         file.TreeId = gitItem.ObjectId;
+        CacheTreeId(Module.WorkingDir, commitId, file.Name, file.TreeId, file.IsSubmodule);
         return commitId == ObjectId.WorkTreeId ? default : file.TreeId;
     }
 
