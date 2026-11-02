@@ -52,7 +52,10 @@ public sealed class RepositoryOpenPerfTests
         }
 
         string worktreeRoot = GetWorktreeRoot();
-        string outputDir = Path.Combine(worktreeRoot, "docs", "hj", "perf");
+        string? outputDirEnv = Environment.GetEnvironmentVariable("HJ_PERF_OUTPUT_DIR");
+        string outputDir = string.IsNullOrWhiteSpace(outputDirEnv)
+            ? Path.Combine(worktreeRoot, "docs", "hj", "perf")
+            : Path.GetFullPath(outputDirEnv);
         Directory.CreateDirectory(outputDir);
 
         bool originalCaptureCallStacks = AppSettings.LogCaptureCallStacks;
