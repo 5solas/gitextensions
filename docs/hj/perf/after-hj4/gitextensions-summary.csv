@@ -1,0 +1,8 @@
+﻿Run,RevisionsLoadingMs,FirstBatchMs,RevisionsLoadedMs,LeftPanelCompletedMs,DiffListCompletedMs,CommitInfoCompletedMs,TotalWallClockMs,TotalProcessCount,UIThreadProcessCount,UIThreadDurationMs
+Run1_Cold,0,1987,1987,1987,2404,2566,2566,18,4,322.0
+Run2_Warm,0,901,1114,1114,1264,1277,1277,11,0,0.0
+Run3_Warm,0,1007,1283,1283,1456,1468,1468,11,0,0.0
+Run4_Warm,0,1080,1276,1276,1425,1444,1444,11,0,0.0
+Run5_Warm,0,1236,1533,1534,1692,1709,1709,11,0,0.0
+NoStashes,0,1318,1563,1563,1703,1710,1710,11,0,0.0
+NoAheadBehind,0,1463,1650,1650,1803,1816,1816,10,0,0.0

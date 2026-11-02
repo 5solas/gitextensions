@@ -1,0 +1,12 @@
+﻿Index,StartOffsetMs,DurationMs,IsOnMainThread,ExitCode,CommandLine,CallStack
+1,861.0,98.9,False,0,"git for-each-ref --format=""%(push:track,nobracket)::%(upstream:track,nobracket)::%(push)::%(upstream)::%(refname:short)"" refs/heads/",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+2,866.3,82.1,False,0,git ls-files -z --unmerged,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+3,869.1,96.0,False,0,"git --no-optional-locks for-each-ref --format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)%00%(taggerdate:unix)""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+4,966.4,270.2,False,0,"git -c log.showsignature=false log -z --pretty=format:""%H%T%P%n%at%n%ct%n%aN%n%aE%n%cN%n%cE%n%B"" --max-count=100000 --exclude=refs/notes/commits --exclude=refs/agents/** --exclude=refs/sessions/** --e",ProcessWrapper..ctor -> Executable.Start -> GitCommandRunner.RunDetached
+5,966.8,92.0,False,0,git worktree list --porcelain -z,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+6,988.2,210.6,False,0,git --no-optional-locks -c diff.ignoresubmodules=none status --porcelain=2 -z --untracked-files,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+7,1147.3,94.0,False,0,"git branch --format=""%(refname)"" -a --merged ""4e67eb94ab99e29e24bcb2d276004b1f661b5deb""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+8,1155.2,99.2,False,0,git branch --contains 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+9,1255.3,92.4,False,0,git tag --contains 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+10,1313.4,80.7,False,0,git diff-tree --name-only -z --cc --no-commit-id 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+11,1348.2,82.8,False,0,git describe --tags --first-parent --abbrev=40 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
