@@ -234,13 +234,11 @@ Git Extensions의 CLI 래핑 아키텍처에 네이티브 인프로세스 라이
 - **config 1회 로드 · 리모트를 config 에서**: 19 / 7
 - **공통 디렉터리 파일 해석 · 충돌 캐시 · 스태시 없을 때 stash list 생략**: 17 / 4
 - **업스트림 반영 후**: 16 / 4 (업스트림 `perf(left panel): paint before TreeView is filled` 반영)
+- **hj-4 (W20/W20b)**: 15~16 / 0 (스태시 없음), 16~17 / 1 (스태시 있음) — config provider 공유, Diff 뷰어 `ls-tree`/`check-attr` 백그라운드화
 
-### 10.3 남은 UI 스레드 호출 (4개)
-진행 중인 후속 작업(W20, W23)으로 표시된 남은 UI 스레드 동기 호출 4개:
-1. **config 두 번째 로드** (진행 중인 후속 작업: W20)
-2. **`stash list`** (스태시가 있을 때만, 진행 중인 후속 작업: W23)
-3. **Diff 뷰어의 `ls-tree`** (진행 중인 후속 작업: W20)
-4. **Diff 뷰어의 `check-attr`** (진행 중인 후속 작업: W20)
+### 10.3 남은 UI 스레드 호출
+- 스태시가 없으면 0개.
+- 스태시가 있으면 `stash list` 1개. 백그라운드화(W23)는 늦게 도착한 SelectionChanged 가 진행 중 Diff 를 취소하고 다시 불러오지 않는 경쟁 때문에 보류(패치 보관, 업스트림 잠재 경쟁 조사 과제).
 
 ### 10.4 설계 원칙
 - **동작 동등성 및 폴백**: 동작 동등성이 증명되지 않으면 기존 git 호출로 폴백
@@ -256,3 +254,17 @@ Git Extensions의 CLI 래핑 아키텍처에 네이티브 인프로세스 라이
 ### 10.6 운영상 발견
 - **테스트 인프라 머신 전역 세마포어**: `GitExtensionsTestAssemblySerializer`
 - **testhost 종료 문제**: 이 머신에서 `--blame-hang-timeout` 이 testhost 를 끝내지 못함
+
+### 10.7 실제 저장소 전후 비교 (hj-4, `docs/hj/perf/after-hj4/`)
+`eng/hj/Measure-RepoOpen.ps1 -Iterations 5 -PerfOutputDir docs\hj\perf\after-hj4` 로 측정 (기준선 = `docs/hj/perf/*-summary.csv`, W13). 웜 = Run2~5 중앙값.
+
+| 지표 | GE 저장소 기준선 | GE hj-4 | git/git 기준선 | git/git hj-4 |
+|---|---|---|---|---|
+| 콜드 열기 (Run1) | 4,156 ms | 2,566 ms | 3,447 ms | 2,811 ms |
+| 웜 열기 중앙값 | 1,760 ms | 1,456 ms (-17%) | 3,455 ms | 3,138 ms (-9%) |
+| 웜 git 프로세스 | 23 | 11 | 22 | 10 |
+| 웜 UI 스레드 git 호출 | 8 (~630 ms) | 0 | 8 (~670 ms) | 0 |
+
+- 줄어든 명령 (GE 웜 Run2): `git remote` 4→0, `git config` 2→0, `git branch` 4→2, `rev-parse` 1→0, `ls-files` 2→1, `for-each-ref` 2→1, `stash` 1→0.
+- 측정 하네스 변경(W27): 대기 루프를 `Thread.Sleep` → `await Task.Delay` 로 바꿈. 업스트림의 좌측 패널 `WaitForIdleAsync` 는 `Application.Idle` 을 기다리는데, 동기 대기 루프가 메시지 루프로 돌아가지 않아 Idle 이 오지 않고 15초 타임아웃까지 막혔음(기준선 측정 당시에는 이 업스트림 변경이 없었음). 대기 방식이 달라 수십 ms 단위 차이는 하네스 영향일 수 있으나, 프로세스 수와 UI 스레드 호출 수는 하네스와 무관.
+- 남은 웜 시간의 대부분은 리비전 로드(`git log`)와 첫 git 호출 전 .NET 구간 — 10.5 의 프로파일링 과제.

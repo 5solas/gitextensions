@@ -1,0 +1,11 @@
+﻿Index,StartOffsetMs,DurationMs,IsOnMainThread,ExitCode,CommandLine,CallStack
+1,1263.7,76.0,False,0,git ls-files -z --unmerged,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+2,1266.6,85.0,False,0,"git --no-optional-locks for-each-ref --format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)%00%(taggerdate:unix)""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+3,1352.7,241.6,False,0,"git -c log.showsignature=false log -z --pretty=format:""%H%T%P%n%at%n%ct%n%aN%n%aE%n%cN%n%cE%n%B"" --max-count=100000 --exclude=refs/notes/commits --exclude=refs/agents/** --exclude=refs/sessions/** --e",ProcessWrapper..ctor -> Executable.Start -> GitCommandRunner.RunDetached
+4,1352.9,95.6,False,0,git worktree list --porcelain -z,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+5,1369.1,203.0,False,0,git --no-optional-locks -c diff.ignoresubmodules=none status --porcelain=2 -z --untracked-files,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+6,1565.4,93.2,False,0,"git branch --format=""%(refname)"" -a --merged ""4e67eb94ab99e29e24bcb2d276004b1f661b5deb""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+7,1572.3,86.2,False,0,git branch --contains 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+8,1659.0,108.7,False,0,git tag --contains 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+9,1688.2,83.8,False,0,git diff-tree --name-only -z --cc --no-commit-id 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+10,1768.2,83.4,False,0,git describe --tags --first-parent --abbrev=40 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
