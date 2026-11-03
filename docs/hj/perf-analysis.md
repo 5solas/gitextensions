@@ -268,3 +268,10 @@ Git Extensions의 CLI 래핑 아키텍처에 네이티브 인프로세스 라이
 - 줄어든 명령 (GE 웜 Run2): `git remote` 4→0, `git config` 2→0, `git branch` 4→2, `rev-parse` 1→0, `ls-files` 2→1, `for-each-ref` 2→1, `stash` 1→0.
 - 측정 하네스 변경(W27): 대기 루프를 `Thread.Sleep` → `await Task.Delay` 로 바꿈. 업스트림의 좌측 패널 `WaitForIdleAsync` 는 `Application.Idle` 을 기다리는데, 동기 대기 루프가 메시지 루프로 돌아가지 않아 Idle 이 오지 않고 15초 타임아웃까지 막혔음(기준선 측정 당시에는 이 업스트림 변경이 없었음). 대기 방식이 달라 수십 ms 단위 차이는 하네스 영향일 수 있으나, 프로세스 수와 UI 스레드 호출 수는 하네스와 무관.
 - 남은 웜 시간의 대부분은 리비전 로드(`git log`)와 첫 git 호출 전 .NET 구간 — 10.5 의 프로파일링 과제.
+
+### 10.8 시작 구간 최적화 (W28, `docs/hj/perf/after-w28/`, 보고서 `docs/hj/perf-w28-report.md`)
+- MEF `AssemblyResolve` 가 `.resources` 요청·앱 디렉터리 요청마다 디렉터리의 모든 파일 버전 정보를 읽던 것을 건너뜀, 영어 번역(English.xlf) 역직렬화 생략, 리모트 색을 config 스냅샷에서 구성.
+- 업스트림 파일에는 추가형 훅만(Translator +6, ManagedExtensibility +7, GitModule +5줄).
+- 코디네이터 재측정(웜 Run3~5): GE 1,456 → 약 1,000 ms, git/git 3,138 → 약 1,830 ms. git 프로세스 수·UI 스레드 git 호출 0 은 변화 없음.
+- 다음 후보: Release 배포의 ReadyToRun(콜드 JIT 400~600 ms 예상), 메뉴/ToolStrip 지연 생성.
+
