@@ -1,0 +1,12 @@
+﻿Index,StartOffsetMs,DurationMs,IsOnMainThread,ExitCode,CommandLine,CallStack
+1,372.1,93.9,False,0,"git for-each-ref --format=""%(push:track,nobracket)::%(upstream:track,nobracket)::%(push)::%(upstream)::%(refname:short)"" refs/heads/",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+2,380.2,77.3,False,0,git ls-files -z --unmerged,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+3,383.9,90.9,False,0,"git --no-optional-locks for-each-ref --format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)%00%(taggerdate:unix)""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+4,476.2,242.5,False,0,"git -c log.showsignature=false log -z --pretty=format:""%H%T%P%n%at%n%ct%n%aN%n%aE%n%cN%n%cE%n%B"" --max-count=100000 --exclude=refs/notes/commits --exclude=refs/agents/** --exclude=refs/sessions/** --e",ProcessWrapper..ctor -> Executable.Start -> GitCommandRunner.RunDetached
+5,476.4,100.2,False,0,git worktree list --porcelain -z,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+6,504.1,213.0,False,0,git --no-optional-locks -c diff.ignoresubmodules=none status --porcelain=2 -z --untracked-files,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+7,682.7,97.1,False,0,"git branch --format=""%(refname)"" -a --merged ""e2012391dbf0cecef84d4bc6bc87b8210f9e39fc""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+8,688.9,97.4,False,0,git branch --contains e2012391dbf0cecef84d4bc6bc87b8210f9e39fc,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+9,786.8,98.6,False,0,git tag --contains e2012391dbf0cecef84d4bc6bc87b8210f9e39fc,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+10,863.7,79.8,False,0,git diff-tree --name-only -z --cc --no-commit-id e2012391dbf0cecef84d4bc6bc87b8210f9e39fc,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+11,885.9,81.1,False,0,git describe --tags --first-parent --abbrev=40 e2012391dbf0cecef84d4bc6bc87b8210f9e39fc,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
