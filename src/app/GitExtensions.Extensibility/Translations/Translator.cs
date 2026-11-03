@@ -12,6 +12,12 @@ public static class Translator
 
     public static IDictionary<string, TranslationFile> GetTranslation(string? translationName)
     {
+        // hj: English.xlf mirrors the source strings; skip deserializing it at startup.
+        if (string.Equals(translationName, EnglishTranslationName, StringComparison.OrdinalIgnoreCase))
+        {
+            translationName = null;
+        }
+
         if (string.IsNullOrEmpty(translationName))
         {
             _translation = new Dictionary<string, TranslationFile>();
