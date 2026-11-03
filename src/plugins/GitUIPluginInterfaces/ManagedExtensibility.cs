@@ -165,6 +165,13 @@ public static class ManagedExtensibility
     {
         try
         {
+            // hj: satellite resources and requests from the app directory are never found by the plugin-folder scan below; skip it.
+            if (args.Name.EndsWith(".resources", StringComparison.OrdinalIgnoreCase) || args.Name.Contains(".resources,", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Path.GetDirectoryName(args.RequestingAssembly?.Location)?.TrimEnd('\\', '/'), AppContext.BaseDirectory.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
             if (args.RequestingAssembly is null)
             {
                 return null;
