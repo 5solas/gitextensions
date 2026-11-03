@@ -2185,6 +2185,11 @@ public sealed partial class GitModule : IGitModule
         {
             lock (_lock)
             {
+                if (_remoteColors is null && TryGetRemoteColorsFromSnapshot(out FrozenDictionary<string, Color>? snapshotColors))
+                {
+                    _remoteColors = snapshotColors;
+                }
+
                 _remoteColors ??= new ConfigFileRemoteSettingsManager(getModule: () => this)
                             .LoadRemotes(loadDisabled: false)
                             .Where(r => !string.IsNullOrEmpty(r.Color) && !string.IsNullOrEmpty(r.Name))
