@@ -1,0 +1,8 @@
+﻿Index,StartOffsetMs,DurationMs,IsOnMainThread,ExitCode,CommandLine,CallStack
+1,838.3,83.9,False,1,git config --get ą,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+2,926.5,137.9,False,0,"git for-each-ref --format=""%(push:track,nobracket)::%(upstream:track,nobracket)::%(push)::%(upstream)::%(refname:short)"" refs/heads/",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+3,1173.2,322.6,False,0,git --no-optional-locks -c diff.ignoresubmodules=none status --porcelain=2 -z --untracked-files,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+4,13334.0,79.7,False,0,git --version,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+5,13415.1,82.1,False,0,git config list --show-scope --includes --null,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+6,19837.2,47.7,False,0,"""C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"" -prerelease -latest -requires Microsoft.VisualStudio.Product.Enterprise -requires Microsoft.VisualStudio.Product.Professional -re",ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+7,19890.6,80.7,True,0,git config list --show-scope --includes --null,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
