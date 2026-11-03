@@ -1,8 +1,10 @@
 // Logic for reading remotes and settings via GitConfigSnapshot.
 // Separated to minimize upstream merge conflicts in GitModule.cs.
 
+using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Drawing;
 using GitCommands.Settings;
 using GitExtensions.Extensibility;
 using GitExtensions.Extensibility.Git;
@@ -173,5 +175,35 @@ public sealed partial class GitModule
             Trace.WriteLine($"Error checking legacy remote directories: {ex.Message}");
             return false;
         }
+    }
+
+    private bool TryGetRemoteColorsFromSnapshot([NotNullWhen(true)] out FrozenDictionary<string, Color>? remoteColors)
+    {
+        if (HasLegacyRemoteDirs())
+        {
+            remoteColors = null;
+            return false;
+        }
+
+        GitConfigSnapshot snapshot = ConfigSnapshotProvider.GetSnapshot();
+        Dictionary<string, Color> colors = [];
+        foreach (string remoteName in snapshot.RemoteNames)
+        {
+            string? colorStr = snapshot.GetLocalValue($"remote.{remoteName}.color")
+                            ?? snapshot.GetEffectiveValue($"remote.{remoteName}.color");
+            if (!string.IsNullOrEmpty(colorStr))
+            {
+                try
+                {
+                    colors[remoteName] = ColorTranslator.FromHtml(colorStr);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        remoteColors = colors.ToFrozenDictionary(StringComparer.Ordinal);
+        return true;
     }
 }
