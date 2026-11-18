@@ -728,7 +728,8 @@ try {
             $totalCount = [int]$counters.total
             $passedCount = [int]$counters.passed
             $failedCount = [int]$counters.failed
-            $skippedCount = [int]($counters.notExecuted + $counters.skipped)
+            # TRX has no 'skipped' attribute (skipped tests count as notExecuted); reading it fails under StrictMode.
+            $skippedCount = [int]$counters.notExecuted
 
             # Inspect failed tests for known environment issues
             $failedNodes = @($trxXml.TestRun.Results.UnitTestResult | Where-Object { $_.outcome -eq 'Failed' })
