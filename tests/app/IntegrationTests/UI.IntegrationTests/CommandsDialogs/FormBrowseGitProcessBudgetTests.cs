@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text;
+using System.Windows.Forms;
 using CommonTestUtils;
 using GitCommands;
 using GitCommands.Logging;
@@ -22,9 +23,9 @@ public class FormBrowseGitProcessBudgetTests
     // still read on the UI thread (moving it off caused a selection race; see the perf notes).
     private const int MaxUiThreadGitProcessesWithoutStash = 0;
     private const int MaxUiThreadGitProcessesWithStash = 1;
-    // Measured 15-16 / 16-17: one background call depends on timing, hence one process of headroom.
-    private const int MaxGitProcessesWithoutStash = 16;
-    private const int MaxGitProcessesWithStash = 17;
+    // Measured 15 / 16 consistently across all runs (selection race de-flaked and activations accounted for).
+    private const int MaxGitProcessesWithoutStash = 15;
+    private const int MaxGitProcessesWithStash = 16;
 
     // 'git status' legitimately runs twice: once for the status monitor and once for the worktree diff.
     private const int MaxProcessesPerCommand = 2;
@@ -76,6 +77,7 @@ public class FormBrowseGitProcessBudgetTests
         GitUICommands commands = new(GlobalServiceContainer.CreateDefaultMockServiceContainer(), referenceRepository.Module);
 
         IReadOnlyList<CommandLogEntry>? recordedCommands = null;
+        int activationCount = 0;
 
         UITest.RunForm(
             showForm: () =>
@@ -85,73 +87,92 @@ public class FormBrowseGitProcessBudgetTests
             },
             async (FormBrowse form) =>
             {
-                FormBrowse.TestAccessor formAccessor = form.GetTestAccessor();
+                ActivationTracker activationTracker = new();
+                activationTracker.AssignHandle(form.Handle);
+                try
+                {
+                    FormBrowse.TestAccessor formAccessor = form.GetTestAccessor();
 
-                // 1. Wait for RevisionGrid data load completion
-                UITest.ProcessUntil(
-                    "Revision grid data load complete",
-                    () => formAccessor.RevisionGrid.GetTestAccessor().IsDataLoadComplete
-                        && formAccessor.RevisionGrid.GetTestAccessor().VisibleRevisionCount >= 3,
-                    maxMilliseconds: StepTimeoutMilliseconds);
+                    // 1. Wait for RevisionGrid data load completion
+                    UITest.ProcessUntil(
+                        "Revision grid data load complete",
+                        () => formAccessor.RevisionGrid.GetTestAccessor().IsDataLoadComplete
+                            && formAccessor.RevisionGrid.GetTestAccessor().VisibleRevisionCount >= 3,
+                        maxMilliseconds: StepTimeoutMilliseconds);
 
-                // 2. Wait for LeftPanel load completion
-                await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
-                NativeTreeView leftTreeView = formAccessor.RepoObjectsTree.GetTestAccessor().TreeView;
-                UITest.ProcessUntil(
-                    "Left panel load complete",
-                    () =>
-                    {
-                        TreeNode? branchesNode = leftTreeView.Nodes.OfType<TreeNode>().FirstOrDefault(n => n.Text == TranslatedStrings.Branches);
-                        TreeNode? remotesNode = leftTreeView.Nodes.OfType<TreeNode>().FirstOrDefault(n => n.Text == TranslatedStrings.Remotes);
-                        TreeNode? tagsNode = leftTreeView.Nodes.OfType<TreeNode>().FirstOrDefault(n => n.Text == TranslatedStrings.Tags);
+                    // 2. Wait for LeftPanel load completion
+                    await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
+                    NativeTreeView leftTreeView = formAccessor.RepoObjectsTree.GetTestAccessor().TreeView;
+                    UITest.ProcessUntil(
+                        "Left panel load complete",
+                        () =>
+                        {
+                            TreeNode? branchesNode = leftTreeView.Nodes.OfType<TreeNode>().FirstOrDefault(n => n.Text == TranslatedStrings.Branches);
+                            TreeNode? remotesNode = leftTreeView.Nodes.OfType<TreeNode>().FirstOrDefault(n => n.Text == TranslatedStrings.Remotes);
+                            TreeNode? tagsNode = leftTreeView.Nodes.OfType<TreeNode>().FirstOrDefault(n => n.Text == TranslatedStrings.Tags);
 
-                        return branchesNode is not null && branchesNode.Nodes.Count >= 2
-                            && remotesNode is not null && remotesNode.Nodes.Count >= 1
-                            && tagsNode is not null && tagsNode.Nodes.Count >= 2;
-                    },
-                    maxMilliseconds: StepTimeoutMilliseconds);
+                            return branchesNode is not null && branchesNode.Nodes.Count >= 2
+                                && remotesNode is not null && remotesNode.Nodes.Count >= 1
+                                && tagsNode is not null && tagsNode.Nodes.Count >= 2;
+                        },
+                        maxMilliseconds: StepTimeoutMilliseconds);
 
-                // 3. Select HEAD revision and wait for Diff file list to load
-                ObjectId headCommitId = referenceRepository.CommitHash is not null
-                    ? ObjectId.Parse(referenceRepository.CommitHash)
-                    : form.Module.GetCurrentCheckout();
+                    // Wait until initial selection has been processed
+                    formAccessor.CommitInfoTabControl.SelectedTab.Should().Be(formAccessor.CommitInfoTabPage);
+                    UITest.ProcessUntil(
+                        "Initial selection commit message loaded",
+                        () => formAccessor.RevisionInfo.GetTestAccessor().CommitMessage.Text.Length > 0,
+                        maxMilliseconds: StepTimeoutMilliseconds);
+                    await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
 
-                formAccessor.RevisionGrid.SetSelectedRevision(headCommitId);
-                formAccessor.CommitInfoTabControl.SelectedTab = formAccessor.DiffTabPage;
+                    // 3. Select HEAD revision and wait for Diff file list to load
+                    ObjectId headCommitId = referenceRepository.CommitHash is not null
+                        ? ObjectId.Parse(referenceRepository.CommitHash)
+                        : form.Module.GetCurrentCheckout();
 
-                RevisionDiffControl.TestAccessor diffAccessor = formAccessor.RevisionDiffControl.GetTestAccessor();
-                UITest.ProcessUntil(
-                    "Diff file list loaded for HEAD",
-                    () => diffAccessor.DiffFiles.GitItemStatuses.Count > 0,
-                    maxMilliseconds: StepTimeoutMilliseconds);
-                await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
+                    formAccessor.RevisionGrid.SetSelectedRevision(headCommitId);
+                    formAccessor.CommitInfoTabControl.SelectedTab = formAccessor.DiffTabPage;
 
-                // 4. Switch to CommitInfo tab and wait for commit message
-                formAccessor.CommitInfoTabControl.SelectedTab = formAccessor.CommitInfoTabPage;
-                UITest.ProcessUntil(
-                    "CommitInfo tab text loaded",
-                    () => formAccessor.RevisionInfo.GetTestAccessor().CommitMessage.Text.Length > 0,
-                    maxMilliseconds: StepTimeoutMilliseconds);
-                await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
+                    RevisionDiffControl.TestAccessor diffAccessor = formAccessor.RevisionDiffControl.GetTestAccessor();
+                    UITest.ProcessUntil(
+                        "Diff file list loaded for HEAD",
+                        () => diffAccessor.DiffFiles.GitItemStatuses.Count > 0,
+                        maxMilliseconds: StepTimeoutMilliseconds);
+                    await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
 
-                // 5. Switch back to Diff tab and wait for diff reload
-                formAccessor.CommitInfoTabControl.SelectedTab = formAccessor.DiffTabPage;
-                UITest.ProcessUntil(
-                    "Diff file list reloaded",
-                    () => diffAccessor.DiffFiles.GitItemStatuses.Count > 0,
-                    maxMilliseconds: StepTimeoutMilliseconds);
-                await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
+                    // 4. Switch to CommitInfo tab and wait for commit message
+                    formAccessor.CommitInfoTabControl.SelectedTab = formAccessor.CommitInfoTabPage;
+                    UITest.ProcessUntil(
+                        "CommitInfo tab text loaded",
+                        () => formAccessor.RevisionInfo.GetTestAccessor().CommitMessage.Text.Length > 0,
+                        maxMilliseconds: StepTimeoutMilliseconds);
+                    await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
 
-                // 6. Settle idle events for 500ms and snapshot CommandLog
-                UITest.ProcessEventsFor(IdleSettleMilliseconds);
-                recordedCommands = CommandLog.Commands.Where(IsGitCommand).ToArray();
+                    // 5. Switch back to Diff tab and wait for diff reload
+                    formAccessor.CommitInfoTabControl.SelectedTab = formAccessor.DiffTabPage;
+                    UITest.ProcessUntil(
+                        "Diff file list reloaded",
+                        () => diffAccessor.DiffFiles.GitItemStatuses.Count > 0,
+                        maxMilliseconds: StepTimeoutMilliseconds);
+                    await AsyncTestHelper.JoinPendingOperationsAsync(TimeSpan.FromMilliseconds(StepTimeoutMilliseconds));
+
+                    // 6. Settle idle events for 500ms and snapshot CommandLog
+                    UITest.ProcessEventsFor(IdleSettleMilliseconds);
+                    recordedCommands = CommandLog.Commands.Where(IsGitCommand).ToArray();
+                }
+                finally
+                {
+                    activationCount = activationTracker.ActivationCount;
+                    activationTracker.ReleaseHandle();
+                }
             });
 
         recordedCommands.Should().NotBeNull("CommandLog snapshot should have been captured before form closed");
         AssertGitProcessBudget(
             recordedCommands!,
             hasStash ? MaxUiThreadGitProcessesWithStash : MaxUiThreadGitProcessesWithoutStash,
-            hasStash ? MaxGitProcessesWithStash : MaxGitProcessesWithoutStash);
+            hasStash ? MaxGitProcessesWithStash : MaxGitProcessesWithoutStash,
+            activationCount);
     }
 
     private static bool IsGitCommand(CommandLogEntry entry)
@@ -190,12 +211,18 @@ public class FormBrowseGitProcessBudgetTests
         return referenceRepository;
     }
 
-    private static void AssertGitProcessBudget(IReadOnlyList<CommandLogEntry> commands, int maxUiThreadGitProcesses, int maxGitProcesses)
+    private static void AssertGitProcessBudget(
+        IReadOnlyList<CommandLogEntry> commands,
+        int maxUiThreadGitProcesses,
+        int maxGitProcesses,
+        int activationCount)
     {
         int totalProcesses = commands.Count;
         int uiThreadProcesses = commands.Count(c => c.IsOnMainThread);
+        int configListCount = commands.Count(c => c.Arguments.StartsWith("config list", StringComparison.OrdinalIgnoreCase));
+        int allowance = Math.Max(0, Math.Min(activationCount, configListCount - 1));
 
-        Console.WriteLine($"=== Git Process Budget Report (Total: {totalProcesses}, UI: {uiThreadProcesses}) ===");
+        Console.WriteLine($"=== Git Process Budget Report (Total: {totalProcesses}, UI: {uiThreadProcesses}, Activations: {activationCount}, Allowance: {allowance}) ===");
         Console.WriteLine(FormatCommandLog(commands));
 
         var repeatedGroups = commands
@@ -213,8 +240,8 @@ public class FormBrowseGitProcessBudgetTests
             $"UI thread git process count exceeded budget ({uiThreadProcesses} > {maxUiThreadGitProcesses}).\n{FormatCommandLog(commands)}");
 
         totalProcesses.Should().BeLessThanOrEqualTo(
-            maxGitProcesses,
-            $"Total git process count exceeded budget ({totalProcesses} > {maxGitProcesses}).\n{FormatCommandLog(commands)}");
+            maxGitProcesses + allowance,
+            $"Total git process count exceeded budget ({totalProcesses} > {maxGitProcesses} + allowance {allowance}).\n{FormatCommandLog(commands)}");
     }
 
     private static string FormatCommandLog(IReadOnlyList<CommandLogEntry> commands)
@@ -269,5 +296,22 @@ public class FormBrowseGitProcessBudgetTests
         stringBuilder.AppendLine();
         stringBuilder.Append(FormatCommandLog(commands));
         return stringBuilder.ToString();
+    }
+
+    private sealed class ActivationTracker : NativeWindow
+    {
+        private const int WmActivateApp = 0x001C;
+
+        public int ActivationCount { get; private set; }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == WmActivateApp && message.WParam != IntPtr.Zero)
+            {
+                ActivationCount++;
+            }
+
+            base.WndProc(ref message);
+        }
     }
 }
