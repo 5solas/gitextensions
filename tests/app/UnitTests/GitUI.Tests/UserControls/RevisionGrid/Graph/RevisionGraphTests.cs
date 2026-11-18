@@ -183,6 +183,68 @@ public class RevisionGraphTests
     }
 
     [Test]
+    public void Add_should_ignore_a_revision_which_is_already_in_the_graph()
+    {
+        RevisionGraph revisionGraph = new();
+        ObjectId parentId = ObjectId.Random();
+        ObjectId revisionId = ObjectId.Random();
+
+        GitRevision revision = new(revisionId) { ParentIds = [parentId] };
+        GitRevision parentRevision = new(parentId);
+
+        revisionGraph.Add(revision);
+        revisionGraph.Add(parentRevision);
+
+        GitRevision duplicateRevision = new(revisionId) { ParentIds = [parentId] };
+        revisionGraph.Add(duplicateRevision);
+
+        revisionGraph.Count.Should().Be(2);
+
+        revisionGraph.LoadingCompleted();
+        revisionGraph.CacheTo(revisionGraph.Count, revisionGraph.Count);
+
+        revisionGraph.GetCachedCount().Should().Be(2);
+        revisionGraph.GetNodeForRow(0).Should().NotBeNull();
+        revisionGraph.GetNodeForRow(1).Should().NotBeNull();
+        revisionGraph.GetNodeForRow(2).Should().BeNull();
+    }
+
+    [Test]
+    public async Task GetNodeForRow_should_not_return_null_while_another_thread_rebuilds_the_cache()
+    {
+        RevisionGraph revisionGraph = new();
+        ObjectId rootId = ObjectId.Random();
+        GitRevision rootRevision = new(rootId);
+        revisionGraph.Add(rootRevision);
+
+        using CancellationTokenSource cancellationTokenSource = new(TimeSpan.FromSeconds(1));
+        CancellationToken cancellationToken = cancellationTokenSource.Token;
+
+        Task writerTask = Task.Run(() =>
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                GitRevision childRevision = new(ObjectId.Random()) { ParentIds = [rootId] };
+                revisionGraph.Add(childRevision);
+                revisionGraph.GetNodeForRow(int.MaxValue - 1);
+            }
+        });
+
+        int nullCount = 0;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (revisionGraph.GetNodeForRow(0) is null)
+            {
+                nullCount++;
+                break;
+            }
+        }
+
+        await writerTask;
+        nullCount.Should().Be(0, "GetNodeForRow(0) should never return null while revisions exist in the graph");
+    }
+
+    [Test]
     public async Task SegmentsAreStraightened([Values] bool mergeGraphLanesHavingCommonParent)
     {
         AppSettings.MergeGraphLanesHavingCommonParent.Value = mergeGraphLanesHavingCommonParent;

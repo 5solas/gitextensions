@@ -12,7 +12,7 @@ namespace GitCommands.Settings;
 /// </summary>
 /// <param name="gitExecutable">The <see cref="IGitExecutor.GitExecutable"/> for the repo of interest.</param>
 [DebuggerDisplay("{" + nameof(DebuggerDisplay) + ",nq}")]
-public sealed class EffectiveGitConfigSettings(IExecutable gitExecutable) : GitConfigSettingsBase(gitExecutable, GitSettingLevel.Effective), IConfigValueStore
+public sealed class EffectiveGitConfigSettings(IExecutable gitExecutable, GitConfigSnapshotProvider? snapshotProvider = null) : GitConfigSettingsBase(gitExecutable, GitSettingLevel.Effective, snapshotProvider), IConfigValueStore
 {
     private void Clear()
     {
@@ -22,6 +22,12 @@ public sealed class EffectiveGitConfigSettings(IExecutable gitExecutable) : GitC
     public override string? GetValue(string name)
     {
         name = NormalizeSettingName(name);
+
+        if (SnapshotProvider is not null)
+        {
+            return SnapshotProvider.GetSnapshot().GetEffectiveValue(name);
+        }
+
         Update();
         return UniqueValueSettings.TryGetValue(name, out string? value) ? value : null;
     }

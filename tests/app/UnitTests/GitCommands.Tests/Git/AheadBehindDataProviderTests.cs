@@ -255,8 +255,90 @@ public class AheadBehindDataProviderTests
             });
     }
 
+    [Test]
+    public void GetData_multiple_calls_should_reuse_cache_and_only_start_process_once()
+    {
+        SetResultOfGitCommand("::ahead 1::::refs/remotes/origin/main::main\n");
+
+        IReadOnlyDictionary<string, AheadBehindData>? result1 = _provider.GetData();
+        IReadOnlyDictionary<string, AheadBehindData>? result2 = _provider.GetData();
+        IReadOnlyDictionary<string, AheadBehindData>? result3 = _provider.GetData();
+
+        result1.Should().NotBeNull();
+        result2.Should().BeSameAs(result1);
+        result3.Should().BeSameAs(result1);
+
+        _executable.Received(1).Start(Arg.Any<ArgumentString>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<Encoding>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task GetData_concurrent_parameterless_calls_should_start_process_only_once()
+    {
+        SetResultOfGitCommand("::ahead 1::::refs/remotes/origin/main::main\n");
+
+        Task<IReadOnlyDictionary<string, AheadBehindData>?> task1 = Task.Run(() => _provider.GetData());
+        Task<IReadOnlyDictionary<string, AheadBehindData>?> task2 = Task.Run(() => _provider.GetData());
+
+        IReadOnlyDictionary<string, AheadBehindData>?[] results = await Task.WhenAll(task1, task2);
+
+        results[0].Should().NotBeNull();
+        results[1].Should().BeSameAs(results[0]);
+
+        _executable.Received(1).Start(Arg.Any<ArgumentString>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<Encoding>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public void GetData_all_branches_should_populate_cache_for_subsequent_single_branch_call()
+    {
+        SetResultOfGitCommand("::ahead 5::::refs/remotes/origin/feature::feature\n::behind 2::::refs/remotes/origin/main::main\n");
+
+        IReadOnlyDictionary<string, AheadBehindData>? allData = _provider.GetData();
+        allData.Should().NotBeNull();
+        allData.Should().HaveCount(2);
+
+        _executable.Received(1).Start(Arg.Any<ArgumentString>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<Encoding>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+
+        IReadOnlyDictionary<string, AheadBehindData>? branchData = _provider.GetData("feature");
+        branchData.Should().NotBeNull();
+        branchData.Should().ContainKey("feature");
+        branchData!["feature"].AheadCount.Should().Be("5");
+
+        // Should NOT start another process
+        _executable.Received(1).Start(Arg.Any<ArgumentString>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<Encoding>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public void GetData_call_for_all_branches_after_single_branch_should_reset_cache_and_start_second_process()
+    {
+        SetResultOfGitCommand("::ahead 5::::refs/remotes/origin/feature::feature\n");
+
+        _provider.GetData("feature").Should().NotBeNull();
+        _executable.Received(1).Start(Arg.Any<ArgumentString>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<Encoding>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+
+        SetResultOfGitCommand("::ahead 5::::refs/remotes/origin/feature::feature\n::behind 2::::refs/remotes/origin/main::main\n");
+
+        _provider.GetData().Should().NotBeNull();
+        _executable.Received(2).Start(Arg.Any<ArgumentString>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<Encoding>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public void ResetCache_should_clear_cache()
+    {
+        SetResultOfGitCommand("::ahead 1::::refs/remotes/origin/main::main\n");
+
+        _provider.GetData().Should().NotBeNull();
+        _executable.Received(1).Start(Arg.Any<ArgumentString>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<Encoding>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+
+        _provider.ResetCache();
+        SetResultOfGitCommand("::ahead 1::::refs/remotes/origin/main::main\n");
+
+        _provider.GetData().Should().NotBeNull();
+        _executable.Received(2).Start(Arg.Any<ArgumentString>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<Encoding>(), Arg.Any<bool>(), Arg.Any<bool>(), Arg.Any<CancellationToken>());
+    }
+
     private void SetResultOfGitCommand(string? result)
     {
+        _standardOutputStream.SetLength(0);
         StreamWriter writer = new(_standardOutputStream);
         writer.Write(result);
         writer.Flush();

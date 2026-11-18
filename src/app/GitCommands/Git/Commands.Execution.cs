@@ -47,6 +47,36 @@ public static partial class Commands
     }
 
     /// <summary>
+    ///  Get all effective config settings from git with their scope.
+    /// </summary>
+    /// <param name="gitExecutable">The <see cref="IGitExecutor.GitExecutable"/> for the affected repo.</param>
+    /// <returns>The scope, names and values of the settings delimited by '\0'.</returns>
+    public static string GetGitSettingsWithScope(this IExecutable gitExecutable)
+    {
+        GitArgumentBuilder args = new("config")
+        {
+            gitExecutable.SupportNewGitConfigSyntax() ? "list" : "--list",
+            "--show-scope",
+            "--includes",
+            "--null"
+        };
+        ExecutionResult result = gitExecutable.Execute(args, throwOnErrorExit: false);
+
+        if (result.ExitedSuccessfully)
+        {
+            return result.StandardOutput;
+        }
+
+        if (result.StandardError.StartsWith("fatal: unable to read config file") && result.StandardError.TrimEnd().EndsWith(": No such file or directory"))
+        {
+            return "";
+        }
+
+        result.ThrowIfErrorExit("Error getting config values with scope");
+        return "unreachable code";
+    }
+
+    /// <summary>
     ///  Gets the name of the currently checked out branch.
     /// </summary>
     /// <param name="gitExecutor">The IGitExecutor for the repo of interest.</param>
@@ -210,4 +240,7 @@ public static partial class Commands
     }
 
     private static bool SupportNewGitConfigSyntax(this IExecutable gitExecutable) => GitVersion.CurrentVersion(gitExecutable).SupportNewGitConfigSyntax;
+
+    private static readonly GitVersion V2_26_0 = new("2.26.0");
+    internal static bool SupportConfigShowScope(this IExecutable gitExecutable) => GitVersion.CurrentVersion(gitExecutable) >= V2_26_0;
 }

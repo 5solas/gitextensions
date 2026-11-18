@@ -25,6 +25,16 @@ public class GetAllChangedFilesOutputParser
     /// <seealso href="https://git-scm.com/docs/git-status"/>
     public IReadOnlyList<GitItemStatus> Parse(string getAllChangedFilesCommandOutput)
     {
+        return ParseResult(getAllChangedFilesCommandOutput).Items;
+    }
+
+    /// <summary>
+    /// Parse the output from git-status --porcelain=2 -z and return both changed items and whether unmerged entries exist.
+    /// </summary>
+    /// <param name="getAllChangedFilesCommandOutput">An output of <see cref="Commands.GetAllChangedFiles"/> command.</param>
+    /// <returns>A <see cref="ChangedFilesParseResult"/> with the parsed items and unmerged flag.</returns>
+    public ChangedFilesParseResult ParseResult(string getAllChangedFilesCommandOutput)
+    {
         return GetAllChangedFilesFromString_v2(getAllChangedFilesCommandOutput);
     }
 
@@ -117,16 +127,17 @@ public class GetAllChangedFilesOutputParser
     /// </summary>
     /// <param name="getAllChangedFilesCommandOutput">output from the git command.</param>
     /// <returns>list with the parsed GitItemStatus.</returns>
-    private static IReadOnlyList<GitItemStatus> GetAllChangedFilesFromString_v2(string getAllChangedFilesCommandOutput)
+    private static ChangedFilesParseResult GetAllChangedFilesFromString_v2(string getAllChangedFilesCommandOutput)
     {
         List<GitItemStatus> diffFiles = [];
 
         if (string.IsNullOrEmpty(getAllChangedFilesCommandOutput))
         {
-            return diffFiles;
+            return new ChangedFilesParseResult(diffFiles, false);
         }
 
         // Split all files on '\0'
+        bool hasUnmergedEntries = false;
         string[] files = getAllChangedFilesCommandOutput.Split(Delimiters.Null, StringSplitOptions.RemoveEmptyEntries);
         for (int n = 0; n < files.Length; ++n)
         {
@@ -192,6 +203,7 @@ public class GetAllChangedFilesOutputParser
             }
             else if (entryType == UnmergedEntry)
             {
+                hasUnmergedEntries = true;
                 DebugHelpers.Assert(line.Length > 161, $"Cannot parse line: {line}");
                 fileName = line[161..].ToString();
             }
@@ -210,7 +222,7 @@ public class GetAllChangedFilesOutputParser
             UpdateItemStatus(y, false, subm, fileName, oldFileName, renamePercent);
         }
 
-        return diffFiles;
+        return new ChangedFilesParseResult(diffFiles, hasUnmergedEntries);
 
         void UpdateItemStatus(char x, bool isIndex, string subm, string fileName, string? oldFileName, string? renamePercent)
         {

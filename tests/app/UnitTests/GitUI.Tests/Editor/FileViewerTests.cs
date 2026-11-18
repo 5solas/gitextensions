@@ -1,5 +1,14 @@
-﻿using GitCommands.Settings;
+﻿using System.ComponentModel.Design;
+using CommonTestUtils;
+using GitCommands;
+using GitCommands.Settings;
+using GitExtensions.Extensibility.Git;
+using GitExtUtils;
+using GitUI;
 using GitUI.Editor;
+using GitUI.ScriptsEngine;
+using NSubstitute;
+using ResourceManager;
 
 namespace GitUITests.Editor;
 
@@ -107,5 +116,30 @@ public class FileViewerTests
 
         accessor.IgnoreAllWhitespacesButton.Checked.Should().Be(false);
         accessor.IgnoreAllWhitespacesMenuItem.Checked.Should().Be(false);
+    }
+
+    [Test]
+    public async Task ViewGitItemAsync_should_not_infinite_loop_when_file_tree_id_cannot_be_found()
+    {
+        using ReferenceRepository referenceRepository = new(createCommit: true);
+        ServiceContainer serviceContainer = new();
+        IScriptsManager scriptsManager = Substitute.For<IScriptsManager>();
+        scriptsManager.GetScripts().Returns([]);
+        serviceContainer.AddService(scriptsManager);
+        serviceContainer.AddService(Substitute.For<IHotkeySettingsLoader>());
+
+        IGitUICommandsSource uiCommandsSource = Substitute.For<IGitUICommandsSource>();
+        GitUICommands uiCommands = new(serviceContainer, referenceRepository.Module);
+        uiCommandsSource.UICommands.Returns(uiCommands);
+
+        _fileViewer.UICommandsSource = uiCommandsSource;
+
+        ObjectId commitObjectId = ObjectId.Parse(referenceRepository.CommitHash!);
+        GitItemStatus nonexistentFile = new("nonexistent_file_that_does_not_exist.txt");
+
+        using CancellationTokenSource cancellationTokenSource = new(TimeSpan.FromSeconds(5));
+        await _fileViewer.ViewGitItemAsync(nonexistentFile, commitObjectId, cancellationToken: cancellationTokenSource.Token);
+
+        nonexistentFile.TreeId.IsZero.Should().BeTrue();
     }
 }

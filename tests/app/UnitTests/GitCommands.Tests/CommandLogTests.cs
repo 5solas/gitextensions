@@ -11,7 +11,7 @@ public class CommandLogTests
     [TestCase("somegit.exe", @"-c config1 -c config2=x verb", "verb")]
     [TestCase("somegit.exe", @"-c config1 -c config2 x verb", "x verb")]
     [TestCase("something.exe", @"-c config=""value with space"" verb", "verb")]
-    [TestCase("gitOnTheRocks", "config list --local --includes --null", "config list --local --includes --null")]
+    [TestCase("gitOnTheRocks", "config list --show-scope --includes --null", "config list --show-scope --includes --null")]
     [TestCase("bitbucket", "--pam --param --parapam", "--pam --param --parapam")]
     [TestCase(@"C:\bitbucket\bucketbit.kexe", "--pam --param --parapam", "--pam --param --parapam")]
     // Not needed and not implemented yet. It just removes '-c core.xxx=""something with \""' at the moment.
@@ -30,8 +30,8 @@ public class CommandLogTests
 
     [TestCase("wsl", @"-d Ubuntu --cd ""\\wsl$\Ubuntu\home\user\repo\project"" git -c config=""value with space"" arg1 arg2", "arg1 arg2")]
     [TestCase(@"wsl -d Ubuntu --cd ""\\wsl$\Ubuntu\home\user\repo\project"" git", @"-c config=""value with space"" arg1 arg2", "arg1 arg2")]
-    [TestCase("wsl", @"-d Ubuntu --cd ""\\wsl$\Ubuntu\home\user\repo\project"" git config list --local --includes --null", "config list --local --includes --null")]
-    [TestCase(@"wsl -d Ubuntu --cd ""\\wsl$\\Ubuntu\\home\\user\\repo\\project git", "config list --local --includes --null", "config list --local --includes --null")]
+    [TestCase("wsl", @"-d Ubuntu --cd ""\\wsl$\Ubuntu\home\user\repo\project"" git config list --show-scope --includes --null", "config list --show-scope --includes --null")]
+    [TestCase(@"wsl -d Ubuntu --cd ""\\wsl$\\Ubuntu\\home\\user\\repo\\project git", "config list --show-scope --includes --null", "config list --show-scope --includes --null")]
     public void CommanLogEntry_ColumnLine_should_display_wsl_git_command(string fileName, string arguments, string expectedMainArguments)
     {
         string origGitCommandValue = AppSettings.GitCommand;
