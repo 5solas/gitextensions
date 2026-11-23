@@ -24,10 +24,24 @@ public abstract class GitConfigSettingsBase(IExecutable gitExecutable, GitSettin
 
     protected bool IsValid => _isValid;
 
+    internal GitConfigSnapshotProvider? SnapshotProvider { get; }
+
+    protected GitConfigSettingsBase(IExecutable gitExecutable, GitSettingLevel gitSettingLevel, GitConfigSnapshotProvider? snapshotProvider)
+        : this(gitExecutable, gitSettingLevel)
+    {
+        SnapshotProvider = snapshotProvider;
+    }
+
     public abstract string? GetValue(string name);
 
     public void Invalidate()
     {
+        if (SnapshotProvider is not null)
+        {
+            SnapshotProvider.Invalidate();
+            return;
+        }
+
         lock (_isValidLock)
         {
             _isValid = false;
@@ -56,7 +70,7 @@ public abstract class GitConfigSettingsBase(IExecutable gitExecutable, GitSettin
     /// </summary>
     /// <param name="name">The setting name.</param>
     /// <returns>The normalized setting name.</returns>
-    protected static string NormalizeSettingName(string name)
+    internal static string NormalizeSettingName(string name)
     {
         if (name.Any(char.IsAsciiLetterUpper))
         {
