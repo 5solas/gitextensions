@@ -172,6 +172,82 @@ public class CommitReachabilityTrackerTests
     }
 
     [Test]
+    public void WaitTimeout_should_be_short()
+    {
+        // git runs only after the wait, a long wait delays the info on large repositories
+        new CommitReachabilityTracker().WaitTimeout.Should().Be(TimeSpan.FromMilliseconds(500));
+    }
+
+    [Test]
+    public async Task WaitForIndexAsync_should_not_wait_for_a_truncated_load()
+    {
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1) };
+        tracker.Begin(1, new ReachabilityLoadOptions(IsUsable: true, CommitsLimit: 2), CreateRefs);
+        tracker.Add(1, Revisions());
+
+        Task<CommitReachabilityIndex?> wait = tracker.WaitForIndexAsync(CancellationToken.None);
+
+        wait.IsCompleted.Should().BeTrue();
+        (await wait).Should().BeNull();
+    }
+
+    [Test]
+    public async Task WaitForIndexAsync_should_stop_waiting_when_the_load_gets_truncated()
+    {
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1) };
+        tracker.Begin(1, new ReachabilityLoadOptions(IsUsable: true, CommitsLimit: 2), CreateRefs);
+        tracker.Add(1, [new GitRevision(_b) { ParentIds = [_a] }]);
+        Task<CommitReachabilityIndex?> wait = tracker.WaitForIndexAsync(CancellationToken.None);
+        wait.IsCompleted.Should().BeFalse();
+
+        tracker.Add(1, [new GitRevision(_a)]);
+
+        (await wait.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeNull();
+    }
+
+    [Test]
+    public async Task WaitForIndexAsync_should_stop_waiting_when_the_load_ends_without_index()
+    {
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1) };
+        tracker.Begin(1, _usable, CreateRefs);
+        Task<CommitReachabilityIndex?> wait = tracker.WaitForIndexAsync(CancellationToken.None);
+
+        // E.g. no revisions at all: the grid is loaded without CompleteReachabilityLoad()
+        tracker.EndWithoutIndex();
+
+        (await wait.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeNull();
+        tracker.TryGetIndex(out _).Should().BeFalse();
+        (await tracker.WaitForIndexAsync(CancellationToken.None)).Should().BeNull();
+    }
+
+    [Test]
+    public void EndWithoutIndex_should_not_drop_a_published_index()
+    {
+        CommitReachabilityTracker tracker = new();
+        tracker.Begin(1, _usable, CreateRefs);
+        tracker.Add(1, Revisions());
+        tracker.Complete(1);
+
+        tracker.EndWithoutIndex();
+
+        tracker.TryGetIndex(out _).Should().BeTrue();
+    }
+
+    [Test]
+    public void Complete_should_release_the_builder()
+    {
+        CommitReachabilityTracker tracker = new();
+        tracker.Begin(1, _usable, CreateRefs);
+        tracker.Add(1, Revisions());
+        tracker.HoldsBuilder.Should().BeTrue();
+
+        tracker.Complete(1);
+
+        tracker.HoldsBuilder.Should().BeFalse();
+        tracker.TryGetIndex(out _).Should().BeTrue();
+    }
+
+    [Test]
     public void FromFilter_should_accept_the_default_filter()
     {
         ReachabilityLoadOptions options = ReachabilityLoadOptions.FromFilter(new FilterInfo());
@@ -190,6 +266,40 @@ public class CommitReachabilityTrackerTests
         FilterInfo lastRevision = new();
         lastRevision.LastRevisionToDisplayHash = _a.ToString();
         ReachabilityLoadOptions.FromFilter(lastRevision).IsUsable.Should().BeFalse();
+
+        ReachabilityLoadOptions.FromFilter(new FilterInfo { IsRaw = true }).IsUsable.Should().BeFalse();
+        ReachabilityLoadOptions.FromFilter(new FilterInfo { ByCommitter = true, Committer = "me" }).IsUsable.Should().BeFalse();
+        ReachabilityLoadOptions.FromFilter(new FilterInfo { ByMessage = true, Message = "fix" }).IsUsable.Should().BeFalse();
+        ReachabilityLoadOptions.FromFilter(new FilterInfo { ByDiffContent = true, DiffContent = "x" }).IsUsable.Should().BeFalse();
+
+        // --boundary
+        ReachabilityLoadOptions.FromFilter(new FilterInfo { ByMessage = true, Message = "fix", ByDiffContent = true, DiffContent = "x" }).IsUsable.Should().BeFalse();
+    }
+
+    [Test]
+    public void FromFilter_should_reject_no_merges_and_simplify_by_decoration()
+    {
+        bool hideMergeCommits = AppSettings.HideMergeCommits;
+        bool showSimplifyByDecoration = AppSettings.ShowSimplifyByDecoration;
+        try
+        {
+            FilterInfo filter = new();
+
+            filter.HideMergeCommits = true;
+            ReachabilityLoadOptions.FromFilter(filter).IsUsable.Should().BeFalse();
+            filter.HideMergeCommits = false;
+
+            filter.ShowSimplifyByDecoration = true;
+            ReachabilityLoadOptions.FromFilter(filter).IsUsable.Should().BeFalse();
+            filter.ShowSimplifyByDecoration = false;
+
+            ReachabilityLoadOptions.FromFilter(filter).IsUsable.Should().BeTrue();
+        }
+        finally
+        {
+            AppSettings.HideMergeCommits = hideMergeCommits;
+            AppSettings.ShowSimplifyByDecoration = showSimplifyByDecoration;
+        }
     }
 
     [Test]

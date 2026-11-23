@@ -24,6 +24,9 @@ internal sealed class CommitReachabilityIndex
     private readonly int[] _children;
     private readonly int[] _firstParent;
     private readonly Dictionary<int, List<RefSnapshot.TagRef>> _tagsByCommit;
+    private readonly bool _isLocalBranchTipMissing;
+    private readonly bool _isRemoteBranchTipMissing;
+    private readonly bool _isTaggedCommitMissing;
 
     private CachedMask? _lastDescendants;
     private CachedMask? _lastAncestors;
@@ -64,6 +67,28 @@ internal sealed class CommitReachabilityIndex
 
                 tags.Add(tag);
             }
+            else if (!tag.IsAnnotated)
+            {
+                // GE lists lightweight tags of commits only (other objects have no author date, see Commands.GetRefs()).
+                // The peeled target of an annotated tag may be another object (e.g. a tree), git does not list it.
+                _isTaggedCommitMissing = true;
+            }
+        }
+
+        // The refs and the commits are read separately: a ref may have been moved by another tool in between.
+        foreach ((string completeName, ObjectId tip) in refs.Branches)
+        {
+            if (!_indexById.ContainsKey(tip))
+            {
+                if (completeName.StartsWith(GitRefName.RefsHeadsPrefix, StringComparison.Ordinal))
+                {
+                    _isLocalBranchTipMissing = true;
+                }
+                else
+                {
+                    _isRemoteBranchTipMissing = true;
+                }
+            }
         }
     }
 
@@ -99,7 +124,10 @@ internal sealed class CommitReachabilityIndex
             return [];
         }
 
-        if (!IsComplete || !Refs.CanReproduceBranches || !Refs.Head.IsKnown || !TryGetCommit(commit, out int index))
+        if (!IsComplete || !Refs.CanReproduceBranches || !Refs.Head.IsKnown
+            || (getLocal && _isLocalBranchTipMissing)
+            || (getRemote && _isRemoteBranchTipMissing)
+            || !TryGetCommit(commit, out int index))
         {
             return null;
         }
@@ -142,7 +170,7 @@ internal sealed class CommitReachabilityIndex
     /// </summary>
     public IReadOnlyList<string>? GetTagsContaining(ObjectId commit)
     {
-        if (!IsComplete || !Refs.CanReproduceTagOrder || !TryGetCommit(commit, out int index))
+        if (!IsComplete || !Refs.CanReproduceTagOrder || _isTaggedCommitMissing || !TryGetCommit(commit, out int index))
         {
             return null;
         }

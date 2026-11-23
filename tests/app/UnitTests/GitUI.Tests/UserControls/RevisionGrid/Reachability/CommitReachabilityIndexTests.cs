@@ -141,12 +141,77 @@ public class CommitReachabilityIndexTests
         Add(builder, "B", "A");
         Add(builder, "A");
         RefSnapshot refs = new(
-            Pairs(("refs/remotes/origin/master", "B"), ("refs/heads/local", "A"), ("refs/heads/other", "OTHER")),
+            Pairs(("refs/remotes/origin/master", "B"), ("refs/heads/local", "A")),
             HeadState.Attached,
             additionalBranches: Pairs(("refs/remotes/origin/HEAD", "B")));
         CommitReachabilityIndex index = builder.Build(refs);
 
         index.GetBranchesContaining(Id("A"), getLocal, getRemote).Should().Equal(expected);
+    }
+
+    [Test]
+    public void Branches_should_not_be_answered_if_a_branch_tip_is_missing()
+    {
+        // E.g. the branch was moved by another tool between reading the refs and git log
+        CommitReachabilityIndexBuilder builder = new();
+        Add(builder, "B", "A");
+        Add(builder, "A");
+        RefSnapshot refs = new(
+            Pairs(("refs/heads/main", "B"), ("refs/remotes/origin/moved", "MISSING")),
+            HeadState.Attached);
+        CommitReachabilityIndex index = builder.Build(refs);
+
+        index.GetBranchesContaining(Id("A"), getLocal: true, getRemote: true).Should().BeNull();
+        index.GetBranchesContaining(Id("A"), getLocal: false, getRemote: true).Should().BeNull();
+
+        // Only the requested kind of branches matters
+        index.GetBranchesContaining(Id("A"), getLocal: true, getRemote: false).Should().Equal("main");
+
+        // An ancestor cannot be outside a complete index
+        index.GetMergedBranches(Id("B")).Should().BeEquivalentTo("refs/heads/main");
+    }
+
+    [Test]
+    public void Tags_should_not_be_answered_if_a_lightweight_tag_target_is_missing()
+    {
+        // GE lists lightweight tags only for commits (no author date otherwise), so the commit is missing
+        CommitReachabilityIndexBuilder builder = new();
+        Add(builder, "A");
+        CommitReachabilityIndex index = builder.Build(Refs(("refs/tags/v1", "A"), ("refs/tags/moved", "MISSING")));
+
+        index.GetTagsContaining(Id("A")).Should().BeNull();
+    }
+
+    [Test]
+    public void Branches_should_use_git_refname_order_for_non_ascii_names()
+    {
+        // git compares the UTF-8 bytes: U+E000 (EE 80 80) is before U+1F600 (F0 9F 98 80), unlike in UTF-16
+        CommitReachabilityIndexBuilder builder = new();
+        Add(builder, "A");
+        RefSnapshot refs = new(
+            Pairs(("refs/heads/😁", "A"), ("refs/heads/😀", "A"), ("refs/heads/", "A"), ("refs/heads/é", "A"), ("refs/heads/z", "A")),
+            HeadState.Attached);
+        CommitReachabilityIndex index = builder.Build(refs);
+
+        index.GetBranchesContaining(Id("A"), getLocal: true, getRemote: false)
+            .Should().Equal("z", "é", "", "😀", "😁");
+    }
+
+    [Test]
+    public void Ref_name_comparison_should_not_allocate()
+    {
+        RefSnapshot.GitRefNameComparer comparer = RefSnapshot.GitRefNameComparer.Instance;
+        comparer.Compare("refs/heads/feature/a", "refs/heads/feature/b");
+        comparer.Compare("refs/heads/😀", "refs/heads/");
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++)
+        {
+            comparer.Compare("refs/heads/feature/a", "refs/heads/feature/b");
+            comparer.Compare("refs/heads/😀", "refs/heads/");
+        }
+
+        (GC.GetAllocatedBytesForCurrentThread() - before).Should().Be(0);
     }
 
     [Test]

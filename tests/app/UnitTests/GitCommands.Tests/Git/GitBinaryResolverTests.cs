@@ -7,6 +7,8 @@ namespace GitCommandsTests.Git;
 public sealed class GitBinaryResolverTests
 {
     private string _root = null!;
+    private string? _originalHome;
+    private long _now;
 
     [SetUp]
     public void SetUp()
@@ -14,11 +16,21 @@ public sealed class GitBinaryResolverTests
         _root = Path.Combine(Path.GetTempPath(), "gitbin-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_root);
         GitBinaryResolver.ClearCache();
+
+        // A HOME without "bin", the redirection is not used if "~/bin" exists
+        _originalHome = Environment.GetEnvironmentVariable("HOME");
+        Directory.CreateDirectory(Path.Combine(_root, "home"));
+        Environment.SetEnvironmentVariable("HOME", Path.Combine(_root, "home"));
+
+        _now = 1_000_000;
+        GitBinaryResolver.GetTickCount = () => _now;
     }
 
     [TearDown]
     public void TearDown()
     {
+        GitBinaryResolver.GetTickCount = () => Environment.TickCount64;
+        Environment.SetEnvironmentVariable("HOME", _originalHome);
         GitBinaryResolver.ClearCache();
         Directory.Delete(_root, recursive: true);
     }
@@ -61,12 +73,42 @@ public sealed class GitBinaryResolverTests
     }
 
     [Test]
-    public void Resolve_prefers_ucrt64_over_mingw64()
+    public void Resolve_returns_null_if_several_real_binaries_exist()
     {
+        // The launcher starts one of them, which one is not known
         string launcher = FakeInstall();
         Touch("mingw64", "bin", "git.exe");
 
-        GitBinaryResolver.Resolve(launcher).Should().Be(Path.Combine(_root, "ucrt64", "bin", "git.exe"));
+        GitBinaryResolver.Resolve(launcher).Should().BeNull();
+    }
+
+    [Test]
+    public void Resolve_returns_null_if_home_bin_exists()
+    {
+        // The real binary puts "~/bin" in front of its own folders in PATH, the launcher behind them
+        string launcher = FakeInstall();
+        Directory.CreateDirectory(Path.Combine(_root, "home", "bin"));
+
+        GitBinaryResolver.Resolve(launcher).Should().BeNull();
+    }
+
+    [Test]
+    public void Resolve_uses_userprofile_if_home_is_not_set()
+    {
+        string launcher = FakeInstall();
+        string? originalUserProfile = Environment.GetEnvironmentVariable("USERPROFILE");
+        try
+        {
+            Environment.SetEnvironmentVariable("HOME", null);
+            Environment.SetEnvironmentVariable("USERPROFILE", Path.Combine(_root, "home"));
+            Directory.CreateDirectory(Path.Combine(_root, "home", "bin"));
+
+            GitBinaryResolver.Resolve(launcher).Should().BeNull();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("USERPROFILE", originalUserProfile);
+        }
     }
 
     [TestCase("mingw64")]
@@ -147,9 +189,47 @@ public sealed class GitBinaryResolverTests
         string expected = Path.Combine(_root, "ucrt64", "bin", "git.exe");
         GitBinaryResolver.Resolve(launcher).Should().Be(expected);
 
+        // Not checked again within the interval
         File.Delete(expected);
+        _now += 29_000;
 
         GitBinaryResolver.Resolve(launcher).Should().Be(expected);
+    }
+
+    [Test]
+    public void Resolve_drops_a_real_binary_which_disappeared()
+    {
+        string launcher = FakeInstall();
+        string expected = Path.Combine(_root, "ucrt64", "bin", "git.exe");
+        GitBinaryResolver.Resolve(launcher).Should().Be(expected);
+
+        File.Delete(expected);
+        _now += 31_000;
+
+        GitBinaryResolver.Resolve(launcher).Should().BeNull();
+
+        // Resolved again after it was dropped from the cache
+        Touch("mingw64", "bin", "git.exe");
+
+        GitBinaryResolver.Resolve(launcher).Should().Be(Path.Combine(_root, "mingw64", "bin", "git.exe"));
+    }
+
+    [Test]
+    public void Resolve_drops_the_real_binary_if_home_bin_was_created()
+    {
+        string launcher = FakeInstall();
+        GitBinaryResolver.Resolve(launcher).Should().NotBeNull();
+
+        Directory.CreateDirectory(Path.Combine(_root, "home", "bin"));
+        _now += 31_000;
+
+        GitBinaryResolver.Resolve(launcher).Should().BeNull();
+    }
+
+    [Test]
+    public void Resolver_is_not_public_api()
+    {
+        typeof(GitBinaryResolver).IsPublic.Should().BeFalse();
     }
 
     [Test]
