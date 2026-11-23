@@ -443,7 +443,7 @@ function Invoke-Main {
     foreach ($p in $plan) {
         # Diagnostics only: GitHub may refuse GITHUB_TOKEN pushes that add/change .github/workflows files.
         $p | Add-Member -NotePropertyName workflowDiff -NotePropertyValue @((Invoke-GitCommand @('diff', '--name-only', $p.old, $p.new, '--', '.github/workflows')).Output | Where-Object { $_.Trim() }).Count
-        $p | Add-Member -NotePropertyName newWorkflowCommits -NotePropertyValue ([int]((Invoke-GitCommand @('rev-list', '--count', $p.new, '--not', "--remotes=$Remote", '--', '.github/workflows')).Text.Trim()))
+        $p | Add-Member -NotePropertyName newWorkflowCommits -NotePropertyValue ([int]((Invoke-GitCommand @('rev-list', '--count', '--full-history', $p.new, '--not', "--remotes=$Remote", '--', '.github/workflows')).Text.Trim()))
     }
     $script:result.refs = $plan.ToArray()
 
