@@ -2,11 +2,13 @@
 
 본 문서는 Git Extensions hj 포크의 업스트림(`upstream/master`) 변경 감지 및 패치 스택 자동 검증 워크플로(`.github/workflows/hj-upstream-watch.yml`)와 헬퍼 스크립트(`eng/hj/Watch-Upstream.ps1`)의 동작 원리 및 사용법을 설명합니다.
 
+> **변경 (자동 반영 도입)**: 매일 실행은 `hj-upstream-autosync.yml` 로 옮겼습니다. 충돌이 없고 검증을 통과하면 자동으로 푸시·태그·릴리스까지 하고, 그렇지 않으면 이 문서와 같은 `upstream-sync` 이슈로 보고합니다. 설계: [UPSTREAM-AUTOSYNC.md](UPSTREAM-AUTOSYNC.md). 이 감시기는 이제 **수동 실행 전용 분석 도구**(원격 변경 없음)입니다.
+
 ---
 
 ## 1. 개요 및 목적
 
-- **목적**: 업스트림(`gitextensions/gitextensions`)의 `master` 브랜치가 전진했을 때, 포크(`5solas/gitextensions`)의 토픽 브랜치 패치 스택(`eng/hj/topics.txt`)이 최신 업스트림 위에 여전히 충돌 없이 rebase 및 머지되는지 매일 자동으로 검증합니다.
+- **목적**: 업스트림(`gitextensions/gitextensions`)의 `master` 브랜치가 전진했을 때, 포크(`5solas/gitextensions`)의 토픽 브랜치 패치 스택(`eng/hj/topics.txt`)이 최신 업스트림 위에 여전히 충돌 없이 rebase 및 머지되는지 필요할 때 검증합니다(매일 자동 검증은 `hj-upstream-autosync`).
 - **비파괴 검증 원칙 (Non-destructive)**:
   - 감지기는 어떠한 브랜치도 push, force-push, tag 또는 release하지 않습니다.
   - 모든 rebase 및 merge 검증은 완전히 격리된 임시 브랜치(`tmp/watch-*`)에서만 수행되며, 검증 완료 즉시 임시 브랜치와 작업 트리를 원복합니다.
@@ -18,10 +20,10 @@
 
 ```mermaid
 flowchart TD
-    A["트리거: 매일 03:17 UTC 스케줄 또는 수동 실행"] --> B["windows-latest 러너 환경 구성 (.NET 10 SDK, Git bot config)"]
+    A["트리거: 수동 실행 (workflow_dispatch)"] --> B["windows-latest 러너 환경 구성 (.NET 10 SDK, Git bot config)"]
     B --> C["upstream/master 및 origin 원격 fetch"]
     C --> D{"upstream/master == origin/master ?"}
-    D -- "일치 (변경 없음)" --> E["열려 있는 upstream-sync 이슈가 있다면 완료 코멘트 후 Close"]
+    D -- "일치 (변경 없음)" --> E["열려 있는 upstream-sync 이슈(review 라벨 제외)가 있다면 완료 코멘트 후 Close"]
     E --> F["Exit 0 (종료)"]
     D -- "불일치 (신규 커밋 감지)" --> G["신규 커밋 수집 (최대 30개 커밋 로그)"]
     G --> H["업스트림 커밋 vs 토픽 브랜치 간 파일 수정 중복(Overlaps) 검출"]
@@ -40,12 +42,12 @@ flowchart TD
 ```
 
 ### 2.1 트리거 및 동시성 제어
-- **스케줄 트리거**: 매일 03:17 UTC (`cron: '17 3 * * *'`). 정시(:00)에 집중되는 GitHub Actions 러너 큐 부하를 분산하기 위해 17분을 선택했습니다.
+- **스케줄 트리거**: 없음. 매일 03:17 UTC 실행은 `hj-upstream-autosync.yml` 이 맡습니다(자동 반영을 끈 `HJ_AUTO_RELEASE=false` 상태에서는 그 워크플로가 이 감시기처럼 보고만 합니다).
 - **수동 실행 (`workflow_dispatch`)**:
   - `base_ref`: 테스트 또는 과거 커밋 시뮬레이션을 위한 기준 커밋 SHA/ref (기본값: 공백 -> `origin/master`).
   - `check_build`: 솔루션 빌드 검증 수행 여부 (기본값: `true`).
 - **권한 (`permissions`)**: `contents: read, issues: write` (이슈 생성 및 갱신에 최소 권한 부여).
-- **동시성 (`concurrency`)**: `group: hj-upstream-watch`, `cancel-in-progress: false` (실행 중복 방지).
+- **동시성 (`concurrency`)**: `group: hj-upstream-sync`, `cancel-in-progress: false` (`hj-upstream-autosync` 와 같은 그룹이라 두 워크플로가 같은 이슈를 동시에 고치지 않음).
 - **작업 제한 시간**: `timeout-minutes: 60`.
 
 ### 2.2 단일 이슈 리포팅 및 멱등성 (Idempotency)
@@ -56,11 +58,16 @@ flowchart TD
 - 업스트림이 이미 `origin/master`와 일치하는 상태라면:
   - 기존에 열려 있던 `upstream-sync` 이슈를 자동으로 닫고(`gh issue close`) 완료 코멘트를 남깁니다.
 - 동일한 업스트림 SHA로 워크플로가 여러 번 실행되어도 중복 이슈가 생성되지 않습니다.
+- `review` 라벨이 붙은 `upstream-sync` 이슈(자동 반영 성공 후 유사 변경 검토용)는 건드리지 않습니다. 사람이 확인하고 닫습니다.
 
 ### 2.3 조기 경보 신호 (File Overlaps)
 - 업스트림 신규 커밋들이 수정한 파일 목록과 포크 토픽 브랜치들이 수정한 파일 목록 간 교집합을 계산합니다.
 - Git 머지 단계에서 충돌 마커가 발생하지 않더라도, 업스트림이 우리가 커스텀 수정한 클래스의 내부 구현이나 API 시그니처를 변경했을 경우 잠재적 런타임 오류가 발생할 수 있습니다.
 - Overlaps 목록은 이러한 영역을 사전 인지할 수 있도록 리포트 상단에 명시합니다.
+
+### 2.4 포크 패치와 유사한 upstream 변경
+- `eng/hj/Find-SimilarUpstream.ps1` 이 `eng/hj/similar-watch.txt` 의 주제(`이름 | 정규식 | 경로 글롭`)와 새 upstream 커밋의 제목·본문·변경 파일을 대조해 일치하는 커밋을 주제별로 나열합니다(없으면 "없음").
+- 공식 저장소에 관여하지 않더라도, 포크가 고친 것과 비슷한 기능·수정이 upstream 에 들어왔는지 알아채기 위한 절입니다. **키워드 대조라 오탐·누락이 있는 보조 수단**입니다. 자세한 내용은 [UPSTREAM-AUTOSYNC.md](UPSTREAM-AUTOSYNC.md) 2.8 절을 보세요.
 
 ---
 
@@ -100,7 +107,7 @@ GitHub 이슈 알림을 받거나 리포트에서 충돌이 확인되면 개발�
 # 작업 트리가 깨끗한 상태에서 실행
 pwsh eng/hj/Sync-Upstream.ps1 -Push
 ```
-푸시가 완료되면 다음 날 watcher 실행 시 `origin/master == upstream/master` 조건이 충족되어 열려 있던 GitHub 이슈가 자동으로 닫힙니다.
+푸시가 완료되면 다음 `hj-upstream-autosync` 실행 시 `origin/master == upstream/master` 조건이 충족되어 열려 있던 GitHub 이슈가 자동으로 닫힙니다. 보통은 자동 반영이 이 단계를 대신하므로, 이 경로는 자동 반영이 실패(`push-rejected-workflows`, `lease-rejected` 등)하거나 꺼져 있을 때 씁니다.
 
 ### 4.2 충돌이 발생한 경우 (`⚠️ 패치 스택 충돌 발생`)
 1. 동기화 스크립트를 실행하여 충돌 위치에서 중단시킵니다:
