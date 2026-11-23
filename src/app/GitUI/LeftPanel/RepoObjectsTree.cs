@@ -313,6 +313,10 @@ public sealed partial class RepoObjectsTree : GitModuleControl
         }
 
         CancellationToken cancellationToken = _selectionCancellationTokenSequence.Next();
+        if (TryApplyMergedBranchesFromGraph(key, selectedRevisions, cancellationToken))
+        {
+            return;
+        }
 
         GitRevision? selectedRevision;
         string? selectedGuid;

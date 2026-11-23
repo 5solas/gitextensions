@@ -1090,6 +1090,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
             _gridView.Focus();
             _gridView.SelectionChanged += OnGridViewSelectionChanged;
             dataLoadId = _gridView.MarkAsDataLoading();
+            BeginReachabilityLoad(dataLoadId, capturedModule, _filterInfo, getUnfilteredRefs);
 
             // Add the spinner controls, removed by SetPage()
             Controls.Add(_loadingControlSpinner);
@@ -1389,6 +1390,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
         void OnRevisionReadCore(IReadOnlyList<GitRevision> revisions)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            AddToReachabilityIndex(dataLoadId, revisions);
 
             if (!firstRevisionReceived)
             {
@@ -1618,6 +1620,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+                CompleteReachabilityLoad(dataLoadId);
                 _gridView.LoadingCompleted(dataLoadId);
 
                 await this.SwitchToMainThreadAsync(cancellationToken);

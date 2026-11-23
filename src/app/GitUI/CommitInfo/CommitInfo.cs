@@ -587,6 +587,10 @@ public partial class CommitInfo : GitModuleControl
             async Task LoadTagInfoAsync(ObjectId objectId)
             {
                 await TaskScheduler.Default;
+                if (await TryLoadTagsFromGraphAsync(objectId, cancellationToken))
+                {
+                    return;
+                }
 
                 string[] tags = [.. Module.GetAllTagsWhichContainGivenCommit(objectId, cancellationToken)];
 
@@ -597,6 +601,10 @@ public partial class CommitInfo : GitModuleControl
             async Task LoadBranchInfoAsync(ObjectId objectId)
             {
                 await TaskScheduler.Default;
+                if (await TryLoadBranchesFromGraphAsync(objectId, cancellationToken))
+                {
+                    return;
+                }
 
                 // Include local branches if explicitly requested or when needed to decide whether to show remotes
                 bool getLocal = AppSettings.CommitInfoShowContainedInBranchesLocal ||
@@ -619,6 +627,11 @@ public partial class CommitInfo : GitModuleControl
                 if (linkFactory is null)
                 {
                     // Cancel the update if the commands source has been unset
+                    return;
+                }
+
+                if (await TryLoadDescribeFromGraphAsync(commitId, linkFactory, cancellationToken))
+                {
                     return;
                 }
 

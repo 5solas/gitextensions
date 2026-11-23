@@ -517,9 +517,9 @@ public class FormBrowseTests
 
                     List<CommandLogEntry> commandList = CommandLog.Commands.ToList();
 
-                    // 1. branch ... --merged: 1 count
+                    // 1. branch ... --merged: 0 count, computed from the reachability index of the revision grid
                     int mergedBranchCount = commandList.Count(c => c.Arguments.Contains("branch") && c.Arguments.Contains("--merged"));
-                    mergedBranchCount.Should().Be(1, "branch --merged should be called exactly once");
+                    mergedBranchCount.Should().Be(0, "branch --merged should be computed from the revision grid instead of git");
 
                     // 2. for-each-ref --sort=-taggerdate: 0 count
                     int sortedTagsCount = commandList.Count(c => c.Arguments.Contains("for-each-ref") && c.Arguments.Contains("-taggerdate"));
