@@ -10,6 +10,13 @@ on:
         description: 'Existing git tag to release (e.g. hj/v7.3.0-hj-1)'
         required: true
         type: string
+  # Called by hj-upstream-autosync.yml: a tag pushed with GITHUB_TOKEN does not trigger 'on: push'.
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Existing git tag to release (e.g. hj/v7.3.0-hj-1)'
+        required: true
+        type: string
 
 concurrency:
   group: hj-release-${{ inputs.tag || github.ref }}
