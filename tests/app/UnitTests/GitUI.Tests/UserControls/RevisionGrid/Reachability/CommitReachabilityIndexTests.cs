@@ -172,6 +172,21 @@ public class CommitReachabilityIndexTests
     }
 
     [Test]
+    public void Tags_should_not_be_answered_if_an_annotated_tag_target_is_missing()
+    {
+        // A commit which was not loaded or another object (e.g. a tree): not distinguishable
+        CommitReachabilityIndexBuilder builder = new();
+        Add(builder, "A");
+        CommitReachabilityIndex index = builder.Build(Refs(("refs/tags/v1", "A"), ("refs/tags/moved^{}", "MISSING"), ("refs/heads/main", "A")));
+
+        index.GetTagsContaining(Id("A")).Should().BeNull();
+
+        // Not affected
+        index.Describe(Id("A")).Should().Be(("v1", string.Empty));
+        index.GetBranchesContaining(Id("A"), getLocal: true, getRemote: true).Should().Equal("main");
+    }
+
+    [Test]
     public void Tags_should_not_be_answered_if_a_lightweight_tag_target_is_missing()
     {
         // GE lists lightweight tags only for commits (no author date otherwise), so the commit is missing
@@ -262,13 +277,13 @@ public class CommitReachabilityIndexTests
     }
 
     [Test]
-    public void Tags_should_be_in_refname_order_and_ignore_non_commits()
+    public void Tags_should_be_in_refname_order()
     {
         CommitReachabilityIndexBuilder builder = new();
         Add(builder, "B", "A");
         Add(builder, "A");
         RefSnapshot refs = new(
-            Pairs(("refs/tags/v2", "B"), ("refs/tags/V1^{}", "A"), ("refs/tags/v1.0", "A"), ("refs/tags/tree^{}", "TREE"), ("refs/heads/main", "B")),
+            Pairs(("refs/tags/v2", "B"), ("refs/tags/V1^{}", "A"), ("refs/tags/v1.0", "A"), ("refs/heads/main", "B")),
             HeadState.Attached);
         CommitReachabilityIndex index = builder.Build(refs);
 

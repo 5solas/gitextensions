@@ -67,10 +67,10 @@ internal sealed class CommitReachabilityIndex
 
                 tags.Add(tag);
             }
-            else if (!tag.IsAnnotated)
+            else
             {
-                // GE lists lightweight tags of commits only (other objects have no author date, see Commands.GetRefs()).
-                // The peeled target of an annotated tag may be another object (e.g. a tree), git does not list it.
+                // The target is a commit which was not loaded. The target of an annotated tag may also be another object
+                // (e.g. a tree), which git does not list, but this cannot be distinguished.
                 _isTaggedCommitMissing = true;
             }
         }

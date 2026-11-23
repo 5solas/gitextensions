@@ -1524,6 +1524,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
 
             _refreshRevisionsSequence.CancelCurrent();
 
+            EndReachabilityLoad(dataLoadId);
             _gridView.MarkAsDataLoadingComplete(dataLoadId);
             this.InvokeAndForget(() => SetPage(new ErrorControl()));
             _isRefreshingRevisions = false;
@@ -1549,6 +1550,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
 
                     bool showArtificial = AddArtificialRevisions();
                     cancellationToken.ThrowIfCancellationRequested();
+                    EndReachabilityLoad(dataLoadId);
                     _gridView.LoadingCompleted(dataLoadId);
 
                     await this.SwitchToMainThreadAsync(cancellationToken);

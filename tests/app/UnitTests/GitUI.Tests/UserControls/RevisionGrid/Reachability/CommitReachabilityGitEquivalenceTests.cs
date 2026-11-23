@@ -68,6 +68,21 @@ public class CommitReachabilityGitEquivalenceTests
         AssertEqualToGit(_helper.Module, index, expectBranchFallbackFor: []);
     }
 
+    [TestCase("^{tree}")]
+    [TestCase(":blob.txt")]
+    public void Annotated_tag_of_another_object_should_fall_back_for_tags(string target)
+    {
+        File.WriteAllText(Path.Combine(_helper.Module.WorkingDir, "blob.txt"), "blob");
+        Git("add blob.txt");
+        Commit("with-blob");
+        Git($"tag -a -m other other-object {_commits["with-blob"]}{target}");
+
+        CommitReachabilityIndex index = BuildIndex(_helper.Module);
+
+        // Everything else is answered and equal to git
+        AssertEqualToGit(_helper.Module, index, expectBranchFallbackFor: [], expectTagFallback: true);
+    }
+
     [Test]
     public void Detached_head_should_fall_back_for_branches_containing_head()
     {
@@ -127,7 +142,7 @@ public class CommitReachabilityGitEquivalenceTests
         return index!;
     }
 
-    private static HashSet<string> AssertEqualToGit(GitModule module, CommitReachabilityIndex index, string[] expectBranchFallbackFor)
+    private static HashSet<string> AssertEqualToGit(GitModule module, CommitReachabilityIndex index, string[] expectBranchFallbackFor, bool expectTagFallback = false)
     {
         List<string> commits = module.GitExecutable.GetOutput("rev-list --all")
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -155,7 +170,15 @@ public class CommitReachabilityGitEquivalenceTests
                 actual.Should().Equal(expected, $"branches containing {sha} (local={getLocal}, remote={getRemote})");
             }
 
-            index.GetTagsContaining(commit).Should().Equal(module.GetAllTagsWhichContainGivenCommit(commit, CancellationToken.None), $"tags containing {sha}");
+            IReadOnlyList<string>? tags = index.GetTagsContaining(commit);
+            if (expectTagFallback)
+            {
+                tags.Should().BeNull($"git must be used for the tags containing {sha}");
+            }
+            else
+            {
+                tags.Should().Equal(module.GetAllTagsWhichContainGivenCommit(commit, CancellationToken.None), $"tags containing {sha}");
+            }
 
             string[] gitMerged = ThreadHelper.JoinableTaskFactory.Run(
                 () => module.GetMergedBranchesAsync(includeRemote: true, fullRefname: true, commit: sha, CancellationToken.None));
@@ -235,7 +258,6 @@ public class CommitReachabilityGitEquivalenceTests
         Git("tag -a -m outer outer-o2 inner-o2");
         Git("tag -d inner-o2");
         Git("tag tree-light " + _commits["c3"] + "^{tree}");
-        Git("tag -a -m tree tree-annotated " + _commits["c3"] + "^{tree}");
     }
 
     private void Commit(string name)

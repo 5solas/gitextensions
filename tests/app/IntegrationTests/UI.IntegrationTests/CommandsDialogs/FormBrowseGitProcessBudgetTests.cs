@@ -9,6 +9,7 @@ using GitExtensions.Extensibility.Git;
 using GitUI;
 using GitUI.CommandsDialogs;
 using GitUI.UserControls;
+using GitUI.UserControls.RevisionGrid.Reachability;
 using NUnit.Framework;
 
 namespace GitExtensions.UITests.CommandsDialogs;
@@ -40,6 +41,7 @@ public class FormBrowseGitProcessBudgetTests
     private bool _originalShowAuthorAvatarColumn;
     private bool _originalShowAvailableDiffTools;
     private bool _originalLogCaptureCallStacks;
+    private TimeSpan _originalReachabilityWaitTimeout;
 
     [OneTimeSetUp]
     public void SetUpFixture()
@@ -47,10 +49,14 @@ public class FormBrowseGitProcessBudgetTests
         _originalShowAuthorAvatarColumn = AppSettings.ShowAuthorAvatarColumn;
         _originalShowAvailableDiffTools = AppSettings.ShowAvailableDiffTools;
         _originalLogCaptureCallStacks = AppSettings.LogCaptureCallStacks;
+        _originalReachabilityWaitTimeout = CommitReachabilityTracker.DefaultWaitTimeout;
 
         AppSettings.ShowAvailableDiffTools = false;
         AppSettings.ShowAuthorAvatarColumn = false;
         AppSettings.LogCaptureCallStacks = true;
+
+        // The budgets must not depend on how fast the revision grid is loaded
+        CommitReachabilityTracker.DefaultWaitTimeout = TimeSpan.FromMilliseconds(StepTimeoutMilliseconds);
     }
 
     [OneTimeTearDown]
@@ -59,6 +65,7 @@ public class FormBrowseGitProcessBudgetTests
         AppSettings.ShowAuthorAvatarColumn = _originalShowAuthorAvatarColumn;
         AppSettings.ShowAvailableDiffTools = _originalShowAvailableDiffTools;
         AppSettings.LogCaptureCallStacks = _originalLogCaptureCallStacks;
+        CommitReachabilityTracker.DefaultWaitTimeout = _originalReachabilityWaitTimeout;
     }
 
     [Test]
