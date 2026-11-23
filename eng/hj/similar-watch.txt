@@ -1,0 +1,26 @@
+# Upstream changes that look similar to fork patches (read by eng/hj/Find-SimilarUpstream.ps1).
+#
+# One topic per line:  name | regex | globs
+#   name   : free text shown in the report.
+#   regex  : .NET regex matched case-insensitively against each upstream commit's subject and body.
+#            Fields are separated by " | " (pipe with spaces), so write alternations WITHOUT spaces: a|b.
+#            Leave empty (or "-") to match by path only.
+#   globs  : comma-separated repo paths. "**" = any depth, "*" = within one path segment.
+#            Leave empty (or "-") to match by keyword only.
+# A commit matches a topic when the regex matches OR any changed file matches a glob.
+# Keyword matching is a hint, not a verdict: expect false positives and misses.
+
+RevisionGraph 중복 추가/정렬 캐시 | RevisionGraph|revision graph|graph lanes?|(added|adding|add) (a |the same )?revision twice|duplicate (revision|commit|node)s?|(sort|order)(ed|ing)? (cache|index) | src/app/GitUI/UserControls/RevisionGrid/Graph/**
+git 프로세스 절감 (일반) | (fewer|reduce[sd]?|avoid|skip|cache[sd]?|batch(es|ed)?)\b[^\r\n]{0,40}\bgit (calls?|process(es)?|invocations?|commands?)|process budget | -
+git 프로세스 절감: config 스냅샷 | config snapshot|ConfigSnapshot|config (-l|--list)\b|read (the )?(git )?config once|EffectiveGitConfig|GitConfigSettings | src/app/GitCommands/Settings/GitConfig*.cs,src/app/GitCommands/Settings/EffectiveGitConfigSettings.cs,src/app/GitCommands/Config/**
+git 프로세스 절감: cat-file --batch | cat-file|--batch(-check|-command)?\b | -
+git 프로세스 절감: ls-tree/check-attr | ls-tree|check-attr|gitattributes|git attributes | src/app/GitCommands/FileHelper*.cs
+git 프로세스 절감: 도달성/contains/merged/describe | --contains|--(no-)?merged|merge-base|\bdescribe\b|ahead[/ -]behind|reachab(le|ility) | src/app/GitCommands/Git/AheadBehind*.cs,src/app/GitUI/LeftPanel/RepoObjectsTree*.cs
+stash list | stash list|refs/stash|stash(es)? (count|lookup|refresh)|without stashes|no stashes | src/app/GitUI/UserControls/RevisionGrid/RevisionGridControl.Stash*.cs,src/app/GitUI/CommandsDialogs/FormStash*.cs,src/app/GitExtensions.Extensibility/Git/GitStash.cs
+실제 git 바이너리 실행 (shim/launcher) | \bshims?\b|launcher|git\.exe|git executable|(real|actual) git (binary|executable|path)|git wrapper|\bscoop\b|cmd[\\/]git | src/app/GitCommands/Git/Executable*.cs,src/app/GitCommands/Git/GitVersion.cs,src/app/GitExtensions.Extensibility/IExecutable.cs
+fsmonitor | fsmonitor|fs[ -]monitor|file ?system monitor|core\.fsmonitor | -
+untracked cache | untracked[ -]?cache|core\.untrackedCache | -
+status --no-optional-locks / index 갱신 | no-optional-locks|GIT_OPTIONAL_LOCKS|index\.lock|update-index|refresh(es|ed|ing)? (the )?index|index refresh | src/app/GitUI/CommandsDialogs/BrowseDialog/GitStatusMonitor.cs
+worktree list | worktrees?\b | src/app/GitUI/CommandsDialogs/WorktreeDialog/**,src/app/GitExtensions.Extensibility/Git/GitWorktree.cs
+콘솔/터미널 (ConEmu 대체, ghostty) | ConEmu|ghostty|terminal|console ?emulat|conpty|pseudo ?console|mintty|\bxterm\b|\bvt100\b | src/app/GitUI/ConsoleEmulation/**,externals/conemu-inside/**
+빌드 도구 탐지 (vswhere) | vswhere|build ?tools|MSBuild\.exe|VC\.Tools|Visual Studio (20\d\d|installation|instance) | src/native/build.proj,src/app/GitExtensions/Project.Publish.targets
