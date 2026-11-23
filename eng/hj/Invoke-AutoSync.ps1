@@ -363,7 +363,8 @@ function Invoke-Main {
     [System.IO.File]::WriteAllText($notesPath, $notes.ToString(), [System.Text.UTF8Encoding]::new($false))
     $script:result.releaseNotes = $notesRel
 
-    [void](Get-GitOutput @('add', '--', 'eng/hj/VERSION', $notesRel))
+    # -f: upstream's .gitignore rule '[Rr]elease*/' matches docs/hj/release-notes/.
+    [void](Get-GitOutput @('add', '-f', '--', 'eng/hj/VERSION', $notesRel))
     [void](Get-GitOutput @('commit', '-q', '--no-verify', '-m', "chore(hj): bump to hj-$hjNumber"))
     $infraEntry = $topicResults | Where-Object { $_.topic -eq $InfraBranch }
     $infraEntry.newSha = Get-GitOutput @('rev-parse', $infraTmp)
