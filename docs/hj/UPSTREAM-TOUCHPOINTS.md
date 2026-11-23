@@ -167,3 +167,31 @@ pwsh eng/hj/Sync-Upstream.ps1 -Topics <path>
    - 캐시 히트나 조건부 최적화인 경우에만 조기 반환(`TryGet...`)을 시도하고, 그 외의 경우에는 항상 기본 업스트림 구현으로 fallthrough되도록 작성합니다.
 4. **업스트림 클래스 확장 시 partial 클래스 또는 별도 파일을 사용한다**:
    - 비즈니스 로직, 데이터 구조, 캐시 모델 등 본체 구현은 포크 전용 파일(`*.ConfigSnapshot.cs`, `*.MergedBranchesCache.cs` 등)로 철저히 분리하여 원본 파일 diff를 극소화합니다.
+
+---
+
+## W30 (hj-7) 추가 접점: 실제 git 바이너리 실행, 메모리 도달성 인덱스
+
+| upstream 파일 | 추가 줄 | 훅 |
+| :--- | ---: | :--- |
+| `src/app/GitCommands/Git/Executable.cs` | 1 | `GitBinaryResolver.TryRedirect(_process.StartInfo)` — 시작할 파일 이름만 실제 바이너리로 교체 |
+| `src/app/GitUI/UserControls/RevisionGrid/RevisionGridControl.cs` | 5 | `BeginReachabilityLoad` / `AddToReachabilityIndex` / `CompleteReachabilityLoad` / `EndReachabilityLoad` ×2 |
+| `src/app/GitUI/CommitInfo/CommitInfo.cs` | 13 | `TryLoadTagsFromGraphAsync` / `TryLoadBranchesFromGraphAsync` / `TryLoadDescribeFromGraphAsync` (답을 냈을 때만 조기 반환) |
+| `src/app/GitUI/LeftPanel/RepoObjectsTree.cs` | 4 | `TryApplyMergedBranchesFromGraph` (인덱스가 즉시 답할 수 있을 때만 조기 반환) |
+| `src/app/GitUI/CommandsDialogs/FormBrowse.InitRevisionGrid.cs` | 1 | `RevisionInfo.SetReachabilityProvider(RevisionGrid)` |
+
+### 동기화 때 직접 대조해야 하는 복제 블록
+
+아래 포크 코드는 upstream 본문의 일부를 복제한다. upstream 이 원본을 바꿔도 충돌이 나지 않으므로, upstream 이 해당 메서드를 수정한 동기화에서는 포크 쪽도 맞춘다.
+
+| 포크 파일 | 복제한 upstream 로직 |
+| :--- | :--- |
+| `CommitInfo.Reachability.cs` (`TryLoadBranchesFromGraphAsync`) | `CommitInfo.LoadBranchInfoAsync` 의 getLocal/getRemote 계산 |
+| `CommitInfo.Reachability.cs` (`TryLoadDescribeFromGraphAsync`) | `CommitInfo.GetDescribeInfoForRevision` 의 describe 문구·링크 조립 |
+| `RepoObjectsTree.MergedFromGraph.cs` | `RepoObjectsTree.SelectionChanged` 의 선택 ref 제외와 병합 표시 루프 |
+
+### git 과 달라지는 동작 (의도됨)
+
+- 화면에서 숨긴 ref 는 "포함하는 브랜치/태그" 와 describe 결과에도 나오지 않는다.
+- 결과는 그리드를 로드한 시점의 ref 기준이다. GE 밖에서 ref 를 바꾼 뒤에는 새로고침해야 반영된다.
+- `UseDirectGitBinary` 설정(기본 켬, 설정 파일 키)으로 실제 바이너리 실행을 끌 수 있다. `MSYSTEM` 이 설정돼 있거나 `%USERPROFILE%in` 이 있으면 자동으로 래퍼를 쓴다.
