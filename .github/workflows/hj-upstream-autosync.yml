@@ -196,7 +196,8 @@ jobs:
   release:
     name: Release build
     needs: sync
-    if: needs.sync.outputs.pushed == 'true' && needs.sync.outputs.release-mode == 'workflow-call'
+    # always(): once the push happened, a later failing step in 'sync' must not skip the release.
+    if: always() && needs.sync.outputs.pushed == 'true' && needs.sync.outputs.release-mode == 'workflow-call'
     permissions:
       contents: write
     uses: ./.github/workflows/hj-release.yml
