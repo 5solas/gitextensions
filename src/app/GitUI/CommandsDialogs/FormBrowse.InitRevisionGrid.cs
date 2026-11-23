@@ -46,6 +46,7 @@ partial class FormBrowse
         };
 
         RevisionInfo.SetRefsProvidedByHost();
+        RevisionInfo.SetReachabilityProvider(RevisionGrid);
 
         bool firstTimeInFileHistoryMode = isFileHistoryMode;
         RevisionGrid.RevisionsLoading += (sender, e) =>

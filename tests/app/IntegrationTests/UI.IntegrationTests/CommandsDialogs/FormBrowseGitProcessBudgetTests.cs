@@ -23,9 +23,10 @@ public class FormBrowseGitProcessBudgetTests
     // still read on the UI thread (moving it off caused a selection race; see the perf notes).
     private const int MaxUiThreadGitProcessesWithoutStash = 0;
     private const int MaxUiThreadGitProcessesWithStash = 1;
-    // Measured 15 / 16 consistently across all runs (selection race de-flaked and activations accounted for).
-    private const int MaxGitProcessesWithoutStash = 15;
-    private const int MaxGitProcessesWithStash = 16;
+    // Measured 11 / 12 in 20 of 20 runs: selecting a commit computes 'branch --contains', 'tag --contains',
+    // 'describe' and 'branch --merged' from the revision grid's reachability index instead of running git.
+    private const int MaxGitProcessesWithoutStash = 11;
+    private const int MaxGitProcessesWithStash = 12;
 
     // 'git status' legitimately runs twice: once for the status monitor and once for the worktree diff.
     private const int MaxProcessesPerCommand = 2;
