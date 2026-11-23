@@ -94,7 +94,7 @@ try {
         if ($globText -and $globText -ne '-') {
             $globs = @($globText -split ',' | Where-Object { $_.Trim() } | ForEach-Object { ConvertTo-GlobRegex $_ })
         }
-        $topics.Add([pscustomobject]@{ Name = $name; Regex = $regex; Globs = $globs; Matches = [System.Collections.Generic.List[object]]::new() })
+        [void]$topics.Add([pscustomobject]@{ Name = $name; Regex = $regex; Globs = $globs; Matches = [System.Collections.Generic.List[object]]::new() })
     }
 
     # Read commits: <RS>sha<US>subject<US>body<US> followed by the changed file names.
@@ -122,14 +122,14 @@ try {
             $reasons = [System.Collections.Generic.List[string]]::new()
             if ($t.Regex) {
                 $m = $t.Regex.Match($text)
-                if ($m.Success) { $reasons.Add("키워드 '$($m.Value.Trim())'") }
+                if ($m.Success) { [void]$reasons.Add("키워드 '$($m.Value.Trim())'") }
             }
             if ($t.Globs.Count -gt 0) {
                 $hit = $files | Where-Object { $f = $_; $t.Globs | Where-Object { $_.IsMatch($f) } } | Select-Object -First 1
-                if ($hit) { $reasons.Add("경로 $hit") }
+                if ($hit) { [void]$reasons.Add("경로 $hit") }
             }
             if ($reasons.Count -gt 0) {
-                $t.Matches.Add([pscustomobject]@{ Sha = $sha; Subject = $subject; Reasons = $reasons.ToArray() })
+                [void]$t.Matches.Add([pscustomobject]@{ Sha = $sha; Subject = $subject; Reasons = $reasons.ToArray() })
                 [void]$matchedShas.Add($sha)
             }
         }

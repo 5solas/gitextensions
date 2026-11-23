@@ -42,6 +42,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# UTF-8 console I/O: Korean report text must not depend on the runner's code page, and native
+# (git/gh) output with non-ASCII commit subjects must decode correctly.
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+} catch {
+    Write-Verbose "Console encoding unchanged: $($_.Exception.Message)"
+}
+
 if (-not $Repo) { $Repo = '5solas/gitextensions' }
 $server = if ($env:GITHUB_SERVER_URL) { $env:GITHUB_SERVER_URL } else { 'https://github.com' }
 $runUrl = if ($env:GITHUB_RUN_ID) { "$server/$Repo/actions/runs/$($env:GITHUB_RUN_ID)" } else { '(local run)' }
