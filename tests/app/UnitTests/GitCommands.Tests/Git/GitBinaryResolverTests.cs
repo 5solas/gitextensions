@@ -8,6 +8,7 @@ public sealed class GitBinaryResolverTests
 {
     private string _root = null!;
     private string? _originalHome;
+    private string? _originalMsystem;
     private long _now;
 
     [SetUp]
@@ -22,6 +23,10 @@ public sealed class GitBinaryResolverTests
         Directory.CreateDirectory(Path.Combine(_root, "home"));
         Environment.SetEnvironmentVariable("HOME", Path.Combine(_root, "home"));
 
+        // The redirection is not used if MSYSTEM is set (e.g. the tests are run in Git Bash)
+        _originalMsystem = Environment.GetEnvironmentVariable("MSYSTEM");
+        Environment.SetEnvironmentVariable("MSYSTEM", null);
+
         _now = 1_000_000;
         GitBinaryResolver.GetTickCount = () => _now;
     }
@@ -31,6 +36,7 @@ public sealed class GitBinaryResolverTests
     {
         GitBinaryResolver.GetTickCount = () => Environment.TickCount64;
         Environment.SetEnvironmentVariable("HOME", _originalHome);
+        Environment.SetEnvironmentVariable("MSYSTEM", _originalMsystem);
         GitBinaryResolver.ClearCache();
         Directory.Delete(_root, recursive: true);
     }
@@ -208,10 +214,53 @@ public sealed class GitBinaryResolverTests
 
         GitBinaryResolver.Resolve(launcher).Should().BeNull();
 
-        // Resolved again after it was dropped from the cache
+        // The negative result is resolved again after the same interval
         Touch("mingw64", "bin", "git.exe");
+        _now += 29_000;
+        GitBinaryResolver.Resolve(launcher).Should().BeNull();
 
+        _now += 2_000;
         GitBinaryResolver.Resolve(launcher).Should().Be(Path.Combine(_root, "mingw64", "bin", "git.exe"));
+    }
+
+    [TestCase("MINGW64")]
+    [TestCase("UCRT64")]
+    public void Resolve_returns_null_if_msystem_is_set(string msystem)
+    {
+        // The real binary does not set up PATH then: sh hooks fail with "cannot spawn"
+        string launcher = FakeInstall();
+        Environment.SetEnvironmentVariable("MSYSTEM", msystem);
+
+        GitBinaryResolver.Resolve(launcher).Should().BeNull();
+    }
+
+    [Test]
+    public void Resolve_rechecks_msystem_after_the_interval()
+    {
+        string launcher = FakeInstall();
+        string expected = Path.Combine(_root, "ucrt64", "bin", "git.exe");
+        GitBinaryResolver.Resolve(launcher).Should().Be(expected);
+
+        Environment.SetEnvironmentVariable("MSYSTEM", "UCRT64");
+        _now += 31_000;
+        GitBinaryResolver.Resolve(launcher).Should().BeNull();
+
+        Environment.SetEnvironmentVariable("MSYSTEM", null);
+        _now += 31_000;
+        GitBinaryResolver.Resolve(launcher).Should().Be(expected);
+    }
+
+    [Test]
+    public void Resolve_applies_all_rules_after_the_interval()
+    {
+        string launcher = FakeInstall();
+        GitBinaryResolver.Resolve(launcher).Should().NotBeNull();
+
+        // A second layout was installed: which binary the launcher starts is not known
+        Touch("mingw64", "bin", "git.exe");
+        _now += 31_000;
+
+        GitBinaryResolver.Resolve(launcher).Should().BeNull();
     }
 
     [Test]

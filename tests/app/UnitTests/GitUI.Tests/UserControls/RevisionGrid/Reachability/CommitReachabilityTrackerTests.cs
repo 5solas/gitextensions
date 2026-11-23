@@ -213,7 +213,7 @@ public class CommitReachabilityTrackerTests
         Task<CommitReachabilityIndex?> wait = tracker.WaitForIndexAsync(CancellationToken.None);
 
         // E.g. no revisions at all: the grid is loaded without CompleteReachabilityLoad()
-        tracker.EndWithoutIndex();
+        tracker.EndWithoutIndex(1);
 
         (await wait.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeNull();
         tracker.TryGetIndex(out _).Should().BeFalse();
@@ -228,9 +228,144 @@ public class CommitReachabilityTrackerTests
         tracker.Add(1, Revisions());
         tracker.Complete(1);
 
-        tracker.EndWithoutIndex();
+        tracker.EndWithoutIndex(1);
 
         tracker.TryGetIndex(out _).Should().BeTrue();
+    }
+
+    [Test]
+    public async Task EndWithoutIndex_should_ignore_another_generation()
+    {
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1) };
+        tracker.Begin(1, _usable, CreateRefs);
+        tracker.Begin(2, _usable, CreateRefs);
+        Task<CommitReachabilityIndex?> wait = tracker.WaitForIndexAsync(CancellationToken.None);
+
+        tracker.EndWithoutIndex(1);
+
+        wait.IsCompleted.Should().BeFalse();
+        tracker.HoldsBuilder.Should().BeTrue();
+        tracker.Add(2, Revisions());
+        tracker.Complete(2);
+        (await wait).Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task EndWithoutIndex_should_release_the_builder()
+    {
+        CommitReachabilityTracker tracker = new();
+        tracker.Begin(1, _usable, CreateRefs);
+
+        tracker.EndWithoutIndex(1);
+
+        tracker.HoldsBuilder.Should().BeFalse();
+        (await tracker.WaitForIndexAsync(CancellationToken.None)).Should().BeNull();
+    }
+
+    [Test]
+    public async Task Complete_should_end_the_load_if_it_is_cancelled()
+    {
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1) };
+        tracker.Begin(1, _usable, () => throw new OperationCanceledException());
+        tracker.Add(1, Revisions());
+        Task<CommitReachabilityIndex?> wait = tracker.WaitForIndexAsync(CancellationToken.None);
+
+        ((Action)(() => tracker.Complete(1))).Should().Throw<OperationCanceledException>();
+
+        (await wait.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeNull();
+        tracker.HoldsBuilder.Should().BeFalse();
+    }
+
+    [Test]
+    public void Load_after_a_truncated_load_of_the_same_repository_should_not_be_waited_for()
+    {
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1) };
+        ReachabilityLoadOptions truncated = new(IsUsable: true, CommitsLimit: 2);
+        tracker.Begin(1, truncated, CreateRefs, "repo");
+        CompleteLoad(tracker, 1);
+
+        tracker.Begin(2, truncated, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeTrue();
+
+        // Not waited for, but still truncated
+        CompleteLoad(tracker, 2);
+        tracker.Begin(3, truncated, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeTrue();
+    }
+
+    [Test]
+    public void Load_after_a_slow_load_of_the_same_repository_should_not_be_waited_for()
+    {
+        long now = 0;
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1), GetTickCount = () => now };
+        tracker.Begin(1, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeFalse();
+        now += 60_001;
+        CompleteLoad(tracker, 1);
+
+        // The skipped wait does not hide that this load is slow, too
+        tracker.Begin(2, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeTrue();
+        now += 60_001;
+        CompleteLoad(tracker, 2);
+        tracker.TryGetIndex(out _).Should().BeTrue("the index is used as soon as it is available");
+
+        // Superseded before it has been completed, but after the timeout
+        tracker.Begin(3, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeTrue();
+        now += 60_001;
+
+        tracker.Begin(4, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeTrue();
+    }
+
+    [Test]
+    public void Load_should_be_waited_for_again_after_a_fast_load()
+    {
+        long now = 0;
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1), GetTickCount = () => now };
+        tracker.Begin(1, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeFalse();
+        now += 60_001;
+        CompleteLoad(tracker, 1);
+
+        tracker.Begin(2, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeTrue();
+        now += 10;
+        CompleteLoad(tracker, 2);
+
+        tracker.Begin(3, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeFalse();
+    }
+
+    [Test]
+    public void Load_should_keep_the_state_of_the_previous_load_if_that_tells_nothing()
+    {
+        long now = 0;
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1), GetTickCount = () => now };
+        tracker.Begin(1, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeFalse();
+        now += 60_001;
+        CompleteLoad(tracker, 1);
+
+        // Superseded at once, then not usable (e.g. filtered)
+        tracker.Begin(2, _usable, CreateRefs, "repo");
+        tracker.Begin(3, new ReachabilityLoadOptions(IsUsable: false, CommitsLimit: 0), CreateRefs, "repo");
+        tracker.Complete(3);
+
+        tracker.Begin(4, _usable, CreateRefs, "repo");
+        IsNotWaitedFor(tracker).Should().BeTrue();
+    }
+
+    [Test]
+    public void Load_of_another_repository_should_be_waited_for()
+    {
+        CommitReachabilityTracker tracker = new() { WaitTimeout = TimeSpan.FromMinutes(1) };
+        tracker.Begin(1, new ReachabilityLoadOptions(IsUsable: true, CommitsLimit: 2), CreateRefs, "repo");
+        CompleteLoad(tracker, 1);
+
+        tracker.Begin(2, _usable, CreateRefs, "other repo");
+        IsNotWaitedFor(tracker).Should().BeFalse();
     }
 
     [Test]
@@ -329,6 +464,15 @@ public class CommitReachabilityTrackerTests
             AppSettings.ShowCurrentBranchOnly.Value = showCurrentBranchOnly;
             AppSettings.BranchFilterEnabled.Value = branchFilterEnabled;
         }
+    }
+
+    private static bool IsNotWaitedFor(CommitReachabilityTracker tracker)
+        => tracker.WaitForIndexAsync(CancellationToken.None).IsCompleted;
+
+    private void CompleteLoad(CommitReachabilityTracker tracker, int loadId)
+    {
+        tracker.Add(loadId, Revisions());
+        tracker.Complete(loadId);
     }
 
     private RefSnapshot CreateRefs()
