@@ -616,10 +616,18 @@ try {
     Invoke-Main
 } catch {
     $err = $_
-    $where = if ($err.InvocationInfo -and $err.InvocationInfo.ScriptName) {
-        "$([System.IO.Path]::GetFileName($err.InvocationInfo.ScriptName)):$($err.InvocationInfo.ScriptLineNumber)"
-    } else { 'unknown' }
-    Set-Status 'error' "$($err.Exception.Message) (위치: $where)"
+    # Compact call chain from the script stack ("Get-GitOutput:101 <- Invoke-Main:220"); the frame text
+    # is localized ("at X, file: line N" / "위치: X, file: 줄 N"), so only the function and the last number are read.
+    $frames = @("$($err.ScriptStackTrace)" -split "`r?`n" | ForEach-Object {
+        if ($_ -match '^\S+\s+(?<fn>[^,]+),.*?(?<line>\d+)\s*$' -and $Matches['fn'] -ne '<ScriptBlock>') { "$($Matches['fn']):$($Matches['line'])" }
+    } | Select-Object -First 3)
+    $where = if ($frames.Count -gt 0) { $frames -join ' <- ' }
+             elseif ($err.InvocationInfo -and $err.InvocationInfo.ScriptName) { "$([System.IO.Path]::GetFileName($err.InvocationInfo.ScriptName)):$($err.InvocationInfo.ScriptLineNumber)" }
+             else { 'unknown' }
+    # One line for the report bullet and the issue title area; the full text goes to errorDetail.
+    $oneLine = (($err.Exception.Message -split "`r?`n") | Where-Object { $_.Trim() }) -join ' / '
+    if ($oneLine.Length -gt 300) { $oneLine = $oneLine.Substring(0, 300) + '…' }
+    Set-Status 'error' "$oneLine (위치: $where)"
     $result.errorDetail = @(
         "$($err.Exception.GetType().FullName): $($err.Exception.Message)"
         $(if ($err.InvocationInfo) { $err.InvocationInfo.PositionMessage })
