@@ -1,9 +1,8 @@
 name: hj-upstream-watch
 
+# Manual, read-only analysis. The daily run moved to hj-upstream-autosync.yml, which also reports
+# in report-only mode (repository variable HJ_AUTO_RELEASE=false). See docs/hj/UPSTREAM-AUTOSYNC.md.
 on:
-  schedule:
-    # Daily run at 03:17 UTC (picked a minute not :00 to avoid runner load spikes)
-    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       base_ref:
@@ -18,7 +17,8 @@ on:
         default: true
 
 concurrency:
-  group: hj-upstream-watch
+  # Shared with hj-upstream-autosync so the two never edit the same issue at once.
+  group: hj-upstream-sync
   cancel-in-progress: false
 
 permissions:
