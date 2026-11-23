@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 using CommonTestUtils;
@@ -79,6 +80,11 @@ public class FormBrowseGitProcessBudgetTests
 
         IReadOnlyList<CommandLogEntry>? recordedCommands = null;
         int activationCount = 0;
+        int activationsBeforeTestBody = 0;
+
+        // Count the activations of FormBrowse from before the form is created: an activation can arrive
+        // before the test body runs, e.g. while the form is shown.
+        using ActivationCounter activationCounter = new();
 
         UITest.RunForm(
             showForm: () =>
@@ -88,8 +94,7 @@ public class FormBrowseGitProcessBudgetTests
             },
             async (FormBrowse form) =>
             {
-                ActivationTracker activationTracker = new();
-                activationTracker.AssignHandle(form.Handle);
+                activationsBeforeTestBody = activationCounter.ActivationCount;
                 try
                 {
                     FormBrowse.TestAccessor formAccessor = form.GetTestAccessor();
@@ -163,8 +168,7 @@ public class FormBrowseGitProcessBudgetTests
                 }
                 finally
                 {
-                    activationCount = activationTracker.ActivationCount;
-                    activationTracker.ReleaseHandle();
+                    activationCount = activationCounter.ActivationCount;
                 }
             });
 
@@ -173,8 +177,12 @@ public class FormBrowseGitProcessBudgetTests
             recordedCommands!,
             hasStash ? MaxUiThreadGitProcessesWithStash : MaxUiThreadGitProcessesWithoutStash,
             hasStash ? MaxGitProcessesWithStash : MaxGitProcessesWithoutStash,
-            activationCount);
+            activationCount,
+            activationsBeforeTestBody);
     }
+
+    private static bool IsConfigList(CommandLogEntry entry)
+        => entry.Arguments.StartsWith("config list", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsGitCommand(CommandLogEntry entry)
     {
@@ -216,19 +224,26 @@ public class FormBrowseGitProcessBudgetTests
         IReadOnlyList<CommandLogEntry> commands,
         int maxUiThreadGitProcesses,
         int maxGitProcesses,
-        int activationCount)
+        int activationCount,
+        int activationsBeforeTestBody)
     {
         int totalProcesses = commands.Count;
         int uiThreadProcesses = commands.Count(c => c.IsOnMainThread);
-        int configListCount = commands.Count(c => c.Arguments.StartsWith("config list", StringComparison.OrdinalIgnoreCase));
-        int allowance = Math.Max(0, Math.Min(activationCount, configListCount - 1));
+        List<CommandLogEntry> configLists = [.. commands.Where(IsConfigList)];
 
-        Console.WriteLine($"=== Git Process Budget Report (Total: {totalProcesses}, UI: {uiThreadProcesses}, Activations: {activationCount}, Allowance: {allowance}) ===");
+        // The first activation of the form does not invalidate the git settings (GitModuleForm.OnApplicationActivated),
+        // each further activation does, which reads the config again (in the background or on the UI thread).
+        // Only these config re-reads are allowed in addition to the budgets.
+        int invalidatingActivations = Math.Max(0, activationCount - 1);
+        int allowance = Math.Max(0, Math.Min(invalidatingActivations, configLists.Count - 1));
+        int uiThreadAllowance = Math.Min(allowance, configLists.Skip(1).Count(c => c.IsOnMainThread));
+
+        Console.WriteLine($"=== Git Process Budget Report (Total: {totalProcesses}, UI: {uiThreadProcesses}, Activations: {activationCount} (before test body: {activationsBeforeTestBody}), ConfigList: {configLists.Count}, Allowance: {allowance}, UI allowance: {uiThreadAllowance}) ===");
         Console.WriteLine(FormatCommandLog(commands));
 
         var repeatedGroups = commands
             .GroupBy(c => CommandLogEntry.GetGitArgumentsWithoutConfiguration(c.Arguments))
-            .Where(g => g.Count() > MaxProcessesPerCommand)
+            .Where(g => g.Count() > MaxProcessesPerCommand + (IsConfigList(g.First()) ? allowance : 0))
             .ToList();
 
         if (repeatedGroups.Count > 0)
@@ -237,8 +252,8 @@ public class FormBrowseGitProcessBudgetTests
         }
 
         uiThreadProcesses.Should().BeLessThanOrEqualTo(
-            maxUiThreadGitProcesses,
-            $"UI thread git process count exceeded budget ({uiThreadProcesses} > {maxUiThreadGitProcesses}).\n{FormatCommandLog(commands)}");
+            maxUiThreadGitProcesses + uiThreadAllowance,
+            $"UI thread git process count exceeded budget ({uiThreadProcesses} > {maxUiThreadGitProcesses} + allowance {uiThreadAllowance}).\n{FormatCommandLog(commands)}");
 
         totalProcesses.Should().BeLessThanOrEqualTo(
             maxGitProcesses + allowance,
@@ -299,20 +314,68 @@ public class FormBrowseGitProcessBudgetTests
         return stringBuilder.ToString();
     }
 
-    private sealed class ActivationTracker : NativeWindow
+    /// <summary>
+    ///  Counts the WM_ACTIVATEAPP (activating) messages sent to FormBrowse windows of the current thread.
+    /// </summary>
+    private sealed class ActivationCounter : IDisposable
     {
+        private const int WhCallWndProc = 4;
         private const int WmActivateApp = 0x001C;
+
+        // Keeps the delegate alive while the hook is installed
+        private readonly HookProc _hookProc;
+        private readonly IntPtr _hook;
+
+        public ActivationCounter()
+        {
+            _hookProc = OnCallWndProc;
+            _hook = SetWindowsHookEx(WhCallWndProc, _hookProc, IntPtr.Zero, GetCurrentThreadId());
+            _hook.Should().NotBe(IntPtr.Zero, $"the activation hook must be installed (error {Marshal.GetLastWin32Error()})");
+        }
+
+        private delegate IntPtr HookProc(int code, IntPtr messageParam, IntPtr messagePointer);
 
         public int ActivationCount { get; private set; }
 
-        protected override void WndProc(ref Message message)
+        public void Dispose()
         {
-            if (message.Msg == WmActivateApp && message.WParam != IntPtr.Zero)
+            UnhookWindowsHookEx(_hook);
+        }
+
+        private IntPtr OnCallWndProc(int code, IntPtr messageParam, IntPtr messagePointer)
+        {
+            if (code >= 0)
             {
-                ActivationCount++;
+                CallWndProcMessage message = Marshal.PtrToStructure<CallWndProcMessage>(messagePointer);
+                if (message.Message == WmActivateApp && message.WParam != IntPtr.Zero && Control.FromHandle(message.HWnd) is FormBrowse)
+                {
+                    ActivationCount++;
+                }
             }
 
-            base.WndProc(ref message);
+            return CallNextHookEx(_hook, code, messageParam, messagePointer);
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int hookId, HookProc hookProc, IntPtr module, uint threadId);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hook);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr messageParam, IntPtr messagePointer);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CallWndProcMessage
+        {
+            public IntPtr LParam;
+            public IntPtr WParam;
+            public uint Message;
+            public IntPtr HWnd;
         }
     }
 }
