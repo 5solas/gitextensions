@@ -182,9 +182,10 @@ if ($baseSha -eq $upstreamSha) {
 
     if ($shouldManageIssues) {
         try {
-            $openIssuesJson = & gh issue list --repo $Repo --label upstream-sync --state open --json number,title 2>$null
+            $openIssuesJson = & gh issue list --repo $Repo --label upstream-sync --state open --json number,title,labels 2>$null
             if ($LASTEXITCODE -eq 0 -and $openIssuesJson) {
-                $openIssues = @(($openIssuesJson -join "`n") | ConvertFrom-Json)
+                # Issues also labelled 'review' (similar upstream changes after an auto-release) are closed by a human.
+                $openIssues = @(($openIssuesJson -join "`n") | ConvertFrom-Json | Where-Object { -not ($_.labels | Where-Object { $_.name -eq 'review' }) })
                 foreach ($iss in $openIssues) {
                     Write-Host "Closing open watcher issue #$($iss.number) ($($iss.title))..." -ForegroundColor Cyan
                     $closeComment = "업스트림($UpstreamRef, ``$shortUpstreamSha``)이 베이스($BaseRef)에 동기화 완료되어 최신 상태입니다. 이슈를 닫습니다."
@@ -300,6 +301,20 @@ foreach ($topic in $topicLines) {
         }
     }
     $topicOverlaps[$topic] = $overlaps
+}
+
+# Upstream commits that look similar to fork patches (keyword/path hint; read-only).
+# This script runs from a temp copy, so resolve the sibling script through the repository root.
+$similarMarkdown = ''
+$similarScript = Join-Path $repoRoot 'eng/hj/Find-SimilarUpstream.ps1'
+if (Test-Path $similarScript) {
+    try {
+        $simResult = & $similarScript -Range "$baseSha..$upstreamSha" 6>$null
+        $simObj = @($simResult | Where-Object { $_ -and $_.PSObject.Properties['Markdown'] }) | Select-Object -Last 1
+        if ($simObj) { $similarMarkdown = $simObj.Markdown }
+    } catch {
+        $similarMarkdown = "### 포크 패치와 유사한 upstream 변경`n`n(검사 실패: $($_.Exception.Message))`n"
+    }
 }
 
 # Dry-run rebase and merge using isolated temporary branches
@@ -555,6 +570,10 @@ if ($allOverlappingFiles.Count -eq 0) {
 }
 [void]$reportSb.AppendLine("")
 
+if ($similarMarkdown) {
+    [void]$reportSb.AppendLine($similarMarkdown)
+}
+
 [void]$reportSb.AppendLine("### 4. 📝 신규 업스트림 커밋 목록 ($commitCount 개)")
 [void]$reportSb.AppendLine("")
 [void]$reportSb.AppendLine($b4)
@@ -617,10 +636,10 @@ if ($shouldManageIssues) {
     & gh label create upstream-sync --description "Upstream synchronization watcher alerts" --color "0E8A16" --force --repo $Repo 2>$null
 
     # Search for existing open issue with label upstream-sync
-    $existingIssuesJson = & gh issue list --repo $Repo --label upstream-sync --state open --json number,title,body 2>$null
+    $existingIssuesJson = & gh issue list --repo $Repo --label upstream-sync --state open --json number,title,body,labels 2>$null
     $openIssue = $null
     if ($LASTEXITCODE -eq 0 -and $existingIssuesJson) {
-        $openIssues = @(($existingIssuesJson -join "`n") | ConvertFrom-Json)
+        $openIssues = @(($existingIssuesJson -join "`n") | ConvertFrom-Json | Where-Object { -not ($_.labels | Where-Object { $_.name -eq 'review' }) })
         if ($openIssues.Count -gt 0) {
             $openIssue = $openIssues[0]
         }
