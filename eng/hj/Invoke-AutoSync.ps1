@@ -54,6 +54,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# UTF-8 console I/O: Korean report text must not depend on the runner's code page, and native
+# (git/gh) output with non-ASCII commit subjects must decode correctly.
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+} catch {
+    Write-Verbose "Console encoding unchanged: $($_.Exception.Message)"
+}
+
+# NOTE: functions that return a value must not let native-command output reach the pipeline
+# (PowerShell returns ALL uncaptured output). Send it to the host with '| Out-Host'.
+
 $SuccessStatuses = @('up-to-date', 'rate-limited', 'ready', 'pushed')
 $StatusLabels = @{
     'up-to-date'              = '✅ 변경 없음'
@@ -119,7 +131,8 @@ function Invoke-TestSuite([string]$Name, [string]$Project, [string]$Filter, [boo
     if ($Filter) { $testArgs += @('--filter', $Filter) }
 
     Write-Host "==> Test suite '$Name' ($(if ($Blocking) { 'blocking' } else { 'report only' }))..." -ForegroundColor Cyan
-    & dotnet @testArgs
+    # '| Out-Host': keep the test runner's output out of this function's return value.
+    & dotnet @testArgs | Out-Host
     $exitCode = $LASTEXITCODE
 
     $suite = [ordered]@{
@@ -174,6 +187,7 @@ $result = [ordered]@{
     dailyLimitHit = $false; similarMatchCount = 0
     topics = @(); mainMerge = 'not run'; build = 'not run'; tests = @()
     refs = @(); pushCommand = ''; pushOutput = ''; probeOutput = ''; pushed = $false
+    errorDetail = ''
 }
 $commitLog = @()
 $similarMarkdown = ''
@@ -297,7 +311,7 @@ function Invoke-Main {
     foreach ($t in $topics) {
         $tmp = "tmp/autosync-$(Get-SafeName $t)"
         [void](Get-GitOutput @('branch', '-f', $tmp, "$Remote/$t"))
-        $script:tempBranches.Add($tmp)
+        [void]$script:tempBranches.Add($tmp)
 
         $before = [int](Get-GitOutput @('rev-list', '--count', "$upstreamSha..$tmp"))
         $adopted = @((Invoke-GitCommand @('cherry', $upstreamSha, $tmp)).Output | Where-Object { $_ -match '^-\s' }).Count
@@ -329,7 +343,7 @@ function Invoke-Main {
             }
             Write-Host "    [OK] $t ($before -> $after, adopted $adopted)" -ForegroundColor Green
         }
-        $topicResults.Add([pscustomobject]$entry)
+        [void]$topicResults.Add([pscustomobject]$entry)
     }
     $script:result.topics = $topicResults.ToArray()
     if ($anyConflict) {
@@ -373,7 +387,7 @@ function Invoke-Main {
     Write-Host "==> Recreating $MainBranch..." -ForegroundColor Cyan
     $mainTmp = "tmp/autosync-$(Get-SafeName $MainBranch)"
     [void](Get-GitOutput @('checkout', '-q', '-B', $mainTmp, $upstreamSha))
-    $script:tempBranches.Add($mainTmp)
+    [void]$script:tempBranches.Add($mainTmp)
     foreach ($tr in $topicResults) {
         if ($tr.status -eq 'adopted') { continue }
         $tmp = "tmp/autosync-$(Get-SafeName $tr.topic)"
@@ -400,14 +414,14 @@ function Invoke-Main {
         $script:submodulesTouched = $true
         [void](Get-GitOutput @('submodule', 'update', '--init', '--recursive'))
         if (-not $SkipNativeBuild) {
-            & dotnet build src/native/build.proj -c Release --verbosity q --nologo "/bl:$(Join-Path $OutDir 'native.binlog')"
+            & dotnet build src/native/build.proj -c Release --verbosity q --nologo "/bl:$(Join-Path $OutDir 'native.binlog')" | Out-Host
             if ($LASTEXITCODE -ne 0) {
                 $script:result.build = 'failed (native)'
                 Set-Status 'build-failed' '네이티브 빌드 실패. 아무것도 푸시하지 않았습니다.'
                 return
             }
         }
-        & dotnet build -c Release --verbosity q --nologo "/bl:$(Join-Path $OutDir 'build.binlog')"
+        & dotnet build -c Release --verbosity q --nologo "/bl:$(Join-Path $OutDir 'build.binlog')" | Out-Host
         if ($LASTEXITCODE -ne 0) {
             $script:result.build = 'failed'
             Set-Status 'build-failed' 'dotnet build 실패. 아무것도 푸시하지 않았습니다.'
@@ -437,9 +451,9 @@ function Invoke-Main {
 
     # ---- Push plan -------------------------------------------------------------------
     $plan = [System.Collections.Generic.List[object]]::new()
-    $plan.Add([pscustomobject]@{ ref = $MirrorBranch; old = $expected[$MirrorBranch]; new = $upstreamSha })
-    foreach ($tr in $topicResults) { $plan.Add([pscustomobject]@{ ref = $tr.topic; old = $expected[$tr.topic]; new = $tr.newSha }) }
-    $plan.Add([pscustomobject]@{ ref = $MainBranch; old = $expected[$MainBranch]; new = $newMainSha })
+    [void]$plan.Add([pscustomobject]@{ ref = $MirrorBranch; old = $expected[$MirrorBranch]; new = $upstreamSha })
+    foreach ($tr in $topicResults) { [void]$plan.Add([pscustomobject]@{ ref = $tr.topic; old = $expected[$tr.topic]; new = $tr.newSha }) }
+    [void]$plan.Add([pscustomobject]@{ ref = $MainBranch; old = $expected[$MainBranch]; new = $newMainSha })
     foreach ($p in $plan) {
         # Diagnostics only: GitHub may refuse GITHUB_TOKEN pushes that add/change .github/workflows files.
         $p | Add-Member -NotePropertyName workflowDiff -NotePropertyValue @((Invoke-GitCommand @('diff', '--name-only', $p.old, $p.new, '--', '.github/workflows')).Output | Where-Object { $_.Trim() }).Count
@@ -450,12 +464,12 @@ function Invoke-Main {
     $pushArgs = [System.Collections.Generic.List[string]]::new()
     foreach ($p in $plan) {
         if ($p.old -eq $p.new) { continue }
-        $pushArgs.Add("--force-with-lease=refs/heads/$($p.ref):$($p.old)")
+        [void]$pushArgs.Add("--force-with-lease=refs/heads/$($p.ref):$($p.old)")
     }
     $refspecs = [System.Collections.Generic.List[string]]::new()
     foreach ($p in $plan) {
         if ($p.old -eq $p.new) { continue }
-        $refspecs.Add("$($p.new):refs/heads/$($p.ref)")
+        [void]$refspecs.Add("$($p.new):refs/heads/$($p.ref)")
     }
     $script:result.pushCommand = "git push --atomic --porcelain $Remote $($pushArgs -join ' ') $($refspecs -join ' ') refs/tags/${tagName}:refs/tags/$tagName"
 
@@ -513,6 +527,15 @@ function Write-Report {
     if ($r.tag) { [void]$sb.AppendLine("- **릴리스**: $b$($r.tag)$b (eng/hj/VERSION → $($r.hjNumber))") }
     if ($r.message) { [void]$sb.AppendLine("- **결과**: $($r.message)") }
     [void]$sb.AppendLine("")
+    if ($r.errorDetail) {
+        [void]$sb.AppendLine("<details><summary>오류 상세 (예외·위치·스택)</summary>")
+        [void]$sb.AppendLine("")
+        [void]$sb.AppendLine("$b$b$b")
+        [void]$sb.AppendLine($r.errorDetail)
+        [void]$sb.AppendLine("$b$b$b")
+        [void]$sb.AppendLine("</details>")
+        [void]$sb.AppendLine("")
+    }
 
     if ($r.topics.Count -gt 0) {
         [void]$sb.AppendLine("### 토픽 rebase")
@@ -592,8 +615,18 @@ function Write-Report {
 try {
     Invoke-Main
 } catch {
-    Set-Status 'error' "$($_.Exception.Message)"
-    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+    $err = $_
+    $where = if ($err.InvocationInfo -and $err.InvocationInfo.ScriptName) {
+        "$([System.IO.Path]::GetFileName($err.InvocationInfo.ScriptName)):$($err.InvocationInfo.ScriptLineNumber)"
+    } else { 'unknown' }
+    Set-Status 'error' "$($err.Exception.Message) (위치: $where)"
+    $result.errorDetail = @(
+        "$($err.Exception.GetType().FullName): $($err.Exception.Message)"
+        $(if ($err.InvocationInfo) { $err.InvocationInfo.PositionMessage })
+        'Script stack:'
+        $err.ScriptStackTrace
+    ) -join "`n"
+    Write-Host $result.errorDetail -ForegroundColor Red
 } finally {
     $state = Test-InProgress
     if ($state.Rebase) { [void](Invoke-GitCommand @('rebase', '--abort')) }
