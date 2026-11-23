@@ -18,6 +18,8 @@
 
 포크 릴리스는 **(1) 로컬 검증 및 태그 생성**과 **(2) GitHub Actions 자동 빌드 및 릴리스 배포**의 2단계로 진행됩니다.
 
+> **자동 릴리스**: upstream 에 새 커밋이 있고 충돌 없이 검증을 통과하면 `hj-upstream-autosync` 워크플로가 아래 1단계(동기화, VERSION 증가, 태그)를 대신 수행합니다. 2단계 빌드는 `hj-release.yml` 을 `workflow_call` 로 호출해 이어 붙입니다(`GITHUB_TOKEN` 으로 푸시한 태그는 `on: push` 를 일으키지 않기 때문). 하루 최대 1회이며 저장소 변수 `HJ_AUTO_RELEASE=false` 로 끌 수 있습니다. 자세한 내용: [UPSTREAM-AUTOSYNC.md](UPSTREAM-AUTOSYNC.md). 아래 수동 절차는 자동 반영이 실패했거나 upstream 변경 없이 토픽만 바뀌었을 때 씁니다.
+
 ```mermaid
 flowchart TD
     A["로컬: eng/hj/VERSION 증가"] --> B["로컬: Release.ps1 -Configuration Release -SkipMsi -Tag"]
@@ -92,7 +94,11 @@ flowchart TD
      - WiX 도구를 사용한 정식 설치 패키지(MSI) 및 포터블 zip 패키징
      - GitHub Release 생성(없는 경우) 및 산출물 첨부 (`gh release upload --clobber`)
      - 로컬에서 먼저 업로드한 동일 이름의 zip 파일이 있더라도 `--clobber` 옵션에 의해 Actions가 새로 빌드한 패키지로 자동 교체됩니다.
-2. **수동 재실행 (workflow_dispatch)**:
+2. **자동 반영에서의 호출 (workflow_call)**:
+   - `hj-upstream-autosync` 가 태그를 푸시한 뒤 같은 실행 안에서 `uses: ./.github/workflows/hj-release.yml`(입력 `tag`)로 빌드합니다. 이때 쓰이는 `hj-release.yml` 은 호출한 쪽(그 시점 `hj/main`) 커밋의 파일입니다.
+   - 비밀값 `HJ_SYNC_TOKEN`(PAT)으로 푸시한 경우에는 태그 푸시가 이 워크플로를 직접 일으키므로 `workflow_call` 은 생략됩니다.
+   - 릴리스 본문은 자동 반영이 커밋한 `docs/hj/release-notes/<문자버전>.md`(새 upstream 커밋 목록과 "포크 패치와 유사한 upstream 변경" 절)입니다. 이 디렉터리는 upstream `.gitignore` 의 `[Rr]elease*/` 규칙에 걸리므로 수동으로 노트를 추가할 때도 `git add -f` 가 필요합니다.
+3. **수동 재실행 (workflow_dispatch)**:
    - 기존 태그에 대해 빌드를 다시 수행하거나 산출물을 다시 붙여야 할 경우, GitHub 저장소 **Actions** 탭에서 `hj-release` 워크플로를 선택하고 **Run workflow**를 실행합니다:
      - `tag`: 릴리스할 태그 이름 지정 (예: `hj/v7.3.0-hj-1`, 필수)
    - **주의**: GitHub 은 워크플로 파일이 **기본 브랜치**에 있을 때만 수동 실행(Run workflow)을 허용합니다. 포크의 기본 브랜치가 업스트림 미러인 `master` 이면 이 버튼이 나타나지 않으므로, 저장소 Settings → General → Default branch 를 `hj/main` 으로 바꿔 두어야 합니다.
