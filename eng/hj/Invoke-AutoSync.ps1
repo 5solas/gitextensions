@@ -617,9 +617,9 @@ try {
 } catch {
     $err = $_
     # Compact call chain from the script stack ("Get-GitOutput:101 <- Invoke-Main:220"); the frame text
-    # is localized ("at X, file: line N" / "위치: X, file: 줄 N"), so only the function and the last number are read.
+    # is localized ("at X, file: line N" on the runner, "X에서 file: 줄 N" on Korean Windows).
     $frames = @("$($err.ScriptStackTrace)" -split "`r?`n" | ForEach-Object {
-        if ($_ -match '^\S+\s+(?<fn>[^,]+),.*?(?<line>\d+)\s*$' -and $Matches['fn'] -ne '<ScriptBlock>') { "$($Matches['fn']):$($Matches['line'])" }
+        if ($_ -match '^(?:at\s+(?<fn>[^,]+),|(?<fn>\S+)에서\s)(?:.*\D)?(?<line>\d+)\s*$' -and $Matches['fn'] -ne '<ScriptBlock>') { "$($Matches['fn']):$($Matches['line'])" }
     } | Select-Object -First 3)
     $where = if ($frames.Count -gt 0) { $frames -join ' <- ' }
              elseif ($err.InvocationInfo -and $err.InvocationInfo.ScriptName) { "$([System.IO.Path]::GetFileName($err.InvocationInfo.ScriptName)):$($err.InvocationInfo.ScriptLineNumber)" }
