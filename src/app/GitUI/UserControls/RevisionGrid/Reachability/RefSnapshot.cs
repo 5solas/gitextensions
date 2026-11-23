@@ -279,7 +279,32 @@ internal sealed class RefSnapshot
                 return 1;
             }
 
-            return Encoding.UTF8.GetBytes(x).AsSpan().SequenceCompareTo(Encoding.UTF8.GetBytes(y));
+            // The order of the code points is the order of the UTF-8 bytes. Unlike UTF-16 code units, this sorts
+            // characters above U+FFFF after U+E000..U+FFFF. Compare without allocating.
+            int length = Math.Min(x.Length, y.Length);
+            for (int i = 0; i < length; i++)
+            {
+                char a = x[i];
+                char b = y[i];
+                if (a == b)
+                {
+                    continue;
+                }
+
+                if (!char.IsSurrogate(a) && !char.IsSurrogate(b))
+                {
+                    return a.CompareTo(b);
+                }
+
+                // The preceding code units are the same: compare the code points starting at i, or at the
+                // high surrogate before i if the difference is in a low surrogate.
+                int start = i > 0 && char.IsHighSurrogate(x[i - 1]) ? i - 1 : i;
+                Rune.DecodeFromUtf16(x.AsSpan(start), out Rune runeA, out _);
+                Rune.DecodeFromUtf16(y.AsSpan(start), out Rune runeB, out _);
+                return runeA != runeB ? runeA.Value.CompareTo(runeB.Value) : a.CompareTo(b);
+            }
+
+            return x.Length.CompareTo(y.Length);
         }
     }
 }

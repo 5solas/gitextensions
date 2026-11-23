@@ -50,8 +50,9 @@ internal sealed class CommitReachabilityTracker : ICommitReachabilityProvider
 
     /// <summary>
     ///  Gets or sets how long to wait for a load in progress before git is used instead.
+    ///  git runs only after the wait, so this delays the info if the index is not available in time.
     /// </summary>
-    public TimeSpan WaitTimeout { get; set; } = TimeSpan.FromSeconds(2);
+    public TimeSpan WaitTimeout { get; set; } = TimeSpan.FromMilliseconds(500);
 
     /// <summary>
     ///  Starts a new generation, the index of the previous generation is no longer used.
@@ -72,12 +73,18 @@ internal sealed class CommitReachabilityTracker : ICommitReachabilityProvider
     public void Add(int loadId, IReadOnlyList<GitRevision> revisions)
     {
         Load? load = Volatile.Read(ref _currentLoad);
-        if (load is null || load.Id != loadId || !load.Options.IsUsable)
+        if (load is null || load.Id != loadId || !load.Options.IsUsable || load.Builder is not CommitReachabilityIndexBuilder builder)
         {
             return;
         }
 
-        load.Builder.Add(revisions);
+        builder.Add(revisions);
+
+        // The history is truncated by --max-count: no index, do not let anybody wait for it.
+        if (load.Options.CommitsLimit > 0 && builder.AddedCount >= load.Options.CommitsLimit)
+        {
+            load.Completion.TrySetResult(null);
+        }
     }
 
     /// <summary>
@@ -95,9 +102,10 @@ internal sealed class CommitReachabilityTracker : ICommitReachabilityProvider
         try
         {
             if (load.Options.IsUsable
-                && (load.Options.CommitsLimit <= 0 || load.Builder.AddedCount < load.Options.CommitsLimit))
+                && load.Builder is CommitReachabilityIndexBuilder builder
+                && (load.Options.CommitsLimit <= 0 || builder.AddedCount < load.Options.CommitsLimit))
             {
-                index = load.Builder.Build(load.CreateRefs(), loadId);
+                index = builder.Build(load.CreateRefs(), loadId);
                 if (!index.IsComplete)
                 {
                     index = null;
@@ -108,6 +116,11 @@ internal sealed class CommitReachabilityTracker : ICommitReachabilityProvider
         {
             // Use git instead
             index = null;
+        }
+        finally
+        {
+            // The index has its own copy of the data
+            load.Builder = null;
         }
 
         lock (_lock)
@@ -172,6 +185,32 @@ internal sealed class CommitReachabilityTracker : ICommitReachabilityProvider
         return await completion.ConfigureAwait(false);
     }
 
+    /// <summary>
+    ///  Ends the current generation without index if it has not been completed, e.g. the grid load ended without
+    ///  revisions. Waiting callers use git immediately instead of waiting for the timeout.
+    /// </summary>
+    public void EndWithoutIndex()
+    {
+        Load? load;
+        lock (_lock)
+        {
+            if (_index is not null)
+            {
+                return;
+            }
+
+            load = _currentLoad;
+        }
+
+        if (load is not null)
+        {
+            load.Builder = null;
+            load.Completion.TrySetResult(null);
+        }
+    }
+
+    internal bool HoldsBuilder => Volatile.Read(ref _currentLoad)?.Builder is not null;
+
     public bool IsCurrent(CommitReachabilityIndex index)
     {
         lock (_lock)
@@ -182,13 +221,22 @@ internal sealed class CommitReachabilityTracker : ICommitReachabilityProvider
 
     private sealed class Load(int id, ReachabilityLoadOptions options, Func<RefSnapshot> createRefs)
     {
+        private CommitReachabilityIndexBuilder? _builder = new();
+
         public int Id { get; } = id;
 
         public ReachabilityLoadOptions Options { get; } = options;
 
         public Func<RefSnapshot> CreateRefs { get; } = createRefs;
 
-        public CommitReachabilityIndexBuilder Builder { get; } = new();
+        /// <summary>
+        ///  Gets or sets the builder, <see langword="null"/> after the load has ended.
+        /// </summary>
+        public CommitReachabilityIndexBuilder? Builder
+        {
+            get => Volatile.Read(ref _builder);
+            set => Volatile.Write(ref _builder, value);
+        }
 
         public TaskCompletionSource<CommitReachabilityIndex?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }

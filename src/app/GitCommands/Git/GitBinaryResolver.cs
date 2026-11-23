@@ -8,10 +8,19 @@ namespace GitCommands;
 ///  git binary of the same Git for Windows installation, which saves one or two process creations per git call.
 ///  Anything not recognized as a known installation layout is left untouched.
 /// </summary>
-public static class GitBinaryResolver
+/// <remarks>
+///  The real binary sets up the same environment as the launcher (MSYSTEM, PLINK_PROTOCOL, GIT_EXEC_PATH, sh in PATH),
+///  verified for the ucrt64 (Git for Windows 2.56.1) and mingw64 (PortableGit 2.47.1) layouts. Only the position of
+///  "~/bin" in PATH differs (in front of the git folders instead of behind them), so the launcher is kept if it exists.
+/// </remarks>
+internal static class GitBinaryResolver
 {
+    private const long RecheckIntervalMilliseconds = 30_000;
+
     private static readonly string[] RealBinaryFolders = ["ucrt64", "clangarm64", "mingw64", "mingw32"];
-    private static readonly ConcurrentDictionary<string, string?> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, CacheEntry> Cache = new(StringComparer.OrdinalIgnoreCase);
+
+    internal static Func<long> GetTickCount { get; set; } = () => Environment.TickCount64;
 
     /// <summary>
     ///  Hook for the process start: replaces <see cref="ProcessStartInfo.FileName"/> if a real binary is found.
@@ -40,8 +49,60 @@ public static class GitBinaryResolver
     /// <summary>
     ///  Resolves the real git binary for a configured git command, or <see langword="null"/> if not applicable.
     /// </summary>
+    /// <remarks>
+    ///  A resolved real binary is checked again at most every 30 seconds (not for every git call). If it no longer
+    ///  exists (e.g. git reinstalled with another layout) or "~/bin" was created, it is dropped from the cache and the
+    ///  configured command is used.
+    /// </remarks>
     internal static string? Resolve(string configuredGitCommand)
-        => Cache.GetOrAdd(configuredGitCommand, ResolveUncached);
+    {
+        CacheEntry entry = Cache.GetOrAdd(configuredGitCommand, command => new CacheEntry(ResolveUncached(command), GetTickCount()));
+        if (entry.RealBinary is null)
+        {
+            return null;
+        }
+
+        long now = GetTickCount();
+        if (now - entry.CheckedAt < RecheckIntervalMilliseconds)
+        {
+            return entry.RealBinary;
+        }
+
+        if (IsUsable(entry.RealBinary))
+        {
+            Cache.TryUpdate(configuredGitCommand, entry with { CheckedAt = now }, entry);
+            return entry.RealBinary;
+        }
+
+        Cache.TryRemove(new KeyValuePair<string, CacheEntry>(configuredGitCommand, entry));
+        return null;
+    }
+
+    private static bool IsUsable(string realBinary)
+    {
+        try
+        {
+            return File.Exists(realBinary) && !HomeBinExists();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///  Gets whether "~/bin" exists, which the real binary puts in front of its own folders in PATH.
+    /// </summary>
+    private static bool HomeBinExists()
+    {
+        string? home = Environment.GetEnvironmentVariable("HOME");
+        if (string.IsNullOrEmpty(home))
+        {
+            home = Environment.GetEnvironmentVariable("USERPROFILE");
+        }
+
+        return !string.IsNullOrEmpty(home) && Directory.Exists(Path.Combine(home, "bin"));
+    }
 
     private static string? ResolveUncached(string configuredGitCommand)
     {
@@ -79,13 +140,13 @@ public static class GitBinaryResolver
                 return null;
             }
 
-            foreach (string folder in RealBinaryFolders)
+            // The launcher starts the binary of its own build: if there are several, which one is not known.
+            string[] candidates = [.. RealBinaryFolders
+                .Select(folder => Path.Combine(root.FullName, folder, "bin", "git.exe"))
+                .Where(File.Exists)];
+            if (candidates.Length == 1 && !HomeBinExists())
             {
-                string candidate = Path.Combine(root.FullName, folder, "bin", "git.exe");
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
+                return candidates[0];
             }
         }
         catch
@@ -118,4 +179,6 @@ public static class GitBinaryResolver
     }
 
     internal static void ClearCache() => Cache.Clear();
+
+    private sealed record CacheEntry(string? RealBinary, long CheckedAt);
 }
