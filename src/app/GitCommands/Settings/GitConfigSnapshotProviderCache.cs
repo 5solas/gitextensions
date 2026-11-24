@@ -37,6 +37,7 @@ internal static class GitConfigSnapshotProviderCache
             if (_cache.TryGetValue(normalized, out WeakReference<GitConfigSnapshotProvider>? weakRef)
                 && weakRef.TryGetTarget(out GitConfigSnapshotProvider? provider))
             {
+                provider.RequestVerification();
                 return provider;
             }
 
@@ -58,7 +59,7 @@ internal static class GitConfigSnapshotProviderCache
                 }
             }
 
-            GitConfigSnapshotProvider newProvider = new(gitExecutable);
+            GitConfigSnapshotProvider newProvider = new(gitExecutable, normalized);
             _cache[normalized] = new WeakReference<GitConfigSnapshotProvider>(newProvider);
             return newProvider;
         }

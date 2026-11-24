@@ -36,6 +36,7 @@ IntegerSetting OutputHistoryDepth = Detailed.OutputHistoryDepth
 BooleanSetting OutputHistoryPanelVisible = Detailed.OutputHistoryPanelVisible
 BooleanSetting RememberDiffDisplayAppearance = Appearance.RememberDiffDisplayAppearance
 BooleanSetting RenderGraphWithDiagonals = Appearance.RevisionGraph.RenderGraphWithDiagonals
+IntegerSetting RepoSnapshotMemoryLimit = RepoSnapshotMemoryLimit
 BooleanSetting ReverseGitColoring = Appearance.ReverseGitColoring
 EnumRuntimeSetting`1<RevisionSortOrder> RevisionSortOrder = RevisionSortOrder
 TextSetting SessionRefsFilters = Appearance.SessionRefsFilters
