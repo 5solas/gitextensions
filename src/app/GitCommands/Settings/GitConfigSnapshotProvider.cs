@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using GitCommands.Git;
+using GitCommands.RepoSnapshot;
 using GitExtensions.Extensibility;
 using GitExtensions.Extensibility.Git;
 using GitUI;
 
 namespace GitCommands.Settings;
 
-public sealed class GitConfigSnapshotProvider(IExecutable gitExecutable)
+public sealed partial class GitConfigSnapshotProvider(IExecutable gitExecutable)
 {
     private const int BackgroundReloadDelayMs = 250;
 
@@ -21,13 +22,14 @@ public sealed class GitConfigSnapshotProvider(IExecutable gitExecutable)
 
     public GitConfigSnapshot GetSnapshot()
     {
-        if (_isValid && _currentSnapshot is not null)
+        if (_isValid && !_isVerificationRequested && _currentSnapshot is { } currentSnapshot)
         {
-            return _currentSnapshot;
+            return currentSnapshot;
         }
 
         lock (_lock)
         {
+            VerifyCurrentSnapshotIfRequested();
             if (_isValid && _currentSnapshot is not null)
             {
                 return _currentSnapshot;
@@ -36,9 +38,10 @@ public sealed class GitConfigSnapshotProvider(IExecutable gitExecutable)
             // If Invalidate() runs while git is reading the config, the result may predate the change:
             // return it to this caller but do not publish it as valid, so the next read loads again.
             int generation = Volatile.Read(ref _generation);
-            GitConfigSnapshot snapshot = LoadSnapshot();
+            GitConfigSnapshot snapshot = LoadOrReuseSnapshot(out ConfigSnapshotPart? part);
             if (generation == Volatile.Read(ref _generation))
             {
+                PublishPart(part);
                 _currentSnapshot = snapshot;
                 _isValid = true;
             }
@@ -52,6 +55,7 @@ public sealed class GitConfigSnapshotProvider(IExecutable gitExecutable)
         int generation = Interlocked.Increment(ref _generation);
         _isValid = false;
         _currentSnapshot = null;
+        RemoveStoredPart();
 
         ThreadHelper.FileAndForget(async () =>
         {

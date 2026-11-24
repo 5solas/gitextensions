@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using GitCommands;
+using GitCommands.RepoSnapshot;
 using GitExtensions.Extensibility.Git;
 using GitUIPluginInterfaces;
 
@@ -14,12 +14,7 @@ public sealed partial class RevisionGridControl
     {
         try
         {
-            if (!getUnfilteredRefs.Value.Any(r => r.CompleteName == GitRefName.RefsStashPrefix))
-            {
-                return [];
-            }
-
-            return new RevisionReader(capturedModule).GetStashes(cancellationToken);
+            return StashListReader.GetStashes(capturedModule, getUnfilteredRefs.Value, cancellationToken);
         }
         catch (Exception ex)
         {

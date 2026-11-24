@@ -17,7 +17,7 @@ namespace GitExtensions.UITests.CommandsDialogs;
 [Apartment(ApartmentState.STA)]
 [Category("GitProcessBudget")]
 [NonParallelizable]
-public class FormBrowseGitProcessBudgetTests
+public partial class FormBrowseGitProcessBudgetTests
 {
     // Budgets for opening a repository and selecting HEAD. Only ever lower these numbers;
     // a failure means a change added git processes (or moved one onto the UI thread).
