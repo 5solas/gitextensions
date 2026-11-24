@@ -9,6 +9,12 @@ namespace GitUI.LeftPanel;
 
 internal sealed class WorktreeTree(TreeNode treeNode, IGitUICommandsSource uiCommands) : Tree(treeNode, uiCommands)
 {
+    private WorktreeLazyLoader LazyLoader => field ??= new(this);
+
+    protected override void OnAttached() => LazyLoader.Attach();
+
+    protected override void OnDetached() => LazyLoader.Detach();
+
     internal void Refresh()
     {
         if (!IsAttached)
@@ -16,6 +22,7 @@ internal sealed class WorktreeTree(TreeNode treeNode, IGitUICommandsSource uiCom
             return;
         }
 
+        LazyLoader.OnRefresh();
         ReloadNodesDetached((_, cancellationToken) => LoadNodesAsync(cancellationToken), getRefs: null!);
     }
 
@@ -23,6 +30,11 @@ internal sealed class WorktreeTree(TreeNode treeNode, IGitUICommandsSource uiCom
     {
         await TaskScheduler.Default;
         token.ThrowIfCancellationRequested();
+
+        if (LazyLoader.TryLoad(Module) is Nodes lazyNodes)
+        {
+            return lazyNodes;
+        }
 
         return FillWorktreeTree(token);
     }
@@ -178,6 +190,8 @@ internal sealed class WorktreeTree(TreeNode treeNode, IGitUICommandsSource uiCom
         {
             TreeViewNode.Expand();
         }
+
+        LazyLoader.LoadIfExpanded();
     }
 
     public void CreateWorktree(IWin32Window owner)

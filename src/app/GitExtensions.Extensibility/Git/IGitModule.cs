@@ -20,6 +20,7 @@ public interface IGitModule
     IEnumerable<(string Setting, string Value)> GetAllLocalSettings();
 
     IReadOnlyList<IGitRef> GetRefs(RefsFilter getRef);
+    IReadOnlyList<IGitRef> GetRefs(RefsFilter getRef, bool withTaggerDate) => GetRefs(getRef);
     IEnumerable<string> GetSettings(string setting);
     IEnumerable<IObjectGitItem> GetTree(ObjectId commitId, bool full, string fileName = "", CancellationToken cancellationToken = default);
 
@@ -178,7 +179,7 @@ public interface IGitModule
     IGitModule GetSubmodule(string? submoduleName);
 
     /// <summary>
-    /// Retrieves registered remotes by running <c>git remote show</c> command.
+    /// Retrieves registered remotes.
     /// </summary>
     /// <returns>Registered remotes.</returns>
     IReadOnlyList<string> GetRemoteNames();

@@ -113,6 +113,7 @@ public partial class FormProcess : FormStatus
 
     private void ProcessStart(FormStatus form)
     {
+        GitCommands.Git.Broker.GitBroker.ReleaseAll();
         BeforeProcessStart();
 
         try

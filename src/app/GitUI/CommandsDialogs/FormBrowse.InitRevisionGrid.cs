@@ -45,6 +45,9 @@ partial class FormBrowse
             }
         };
 
+        RevisionInfo.SetRefsProvidedByHost();
+        RevisionInfo.SetReachabilityProvider(RevisionGrid);
+
         bool firstTimeInFileHistoryMode = isFileHistoryMode;
         RevisionGrid.RevisionsLoading += (sender, e) =>
         {
@@ -54,6 +57,8 @@ partial class FormBrowse
                 firstTimeInFileHistoryMode = false;
                 CommitInfoTabControl.SelectedTab = DiffTabPage;
             }
+
+            RevisionInfo.SetRefs(e.GetRefs);
 
             if (sender is null || MainSplitContainer.Panel1Collapsed)
             {
