@@ -275,6 +275,13 @@ public class FormBrowseTests
 
                 WaitForRevisionsToBeLoaded(form);
 
+                // The tab has loaded the files. The (throttled) selection of the revision grid loads them again, which discards
+                // the selection of a file. The previous statuses are provided meanwhile, so do not only wait for these.
+                System.Windows.Forms.Timer selectionTimer = (System.Windows.Forms.Timer)typeof(RevisionGridControl)
+                    .GetField("_selectionTimer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(ta.RevisionGrid)!;
+                UITest.ProcessUntil("waiting for revision selection", () => ta.RevisionGrid.LatestSelectedRevision is not null && !selectionTimer.Enabled, maxMilliseconds);
+                await AsyncTestHelper.JoinPendingOperationsAsync(AsyncTestHelper.UnexpectedTimeout);
+
                 IReadOnlyList<GitItemStatus> files = [];
                 UITest.ProcessUntil("waiting for files", () => { return (files = fileStatusList.GitItemStatuses).Count == 2; }, maxMilliseconds);
                 GitItemStatus fileToSelect = files[1];

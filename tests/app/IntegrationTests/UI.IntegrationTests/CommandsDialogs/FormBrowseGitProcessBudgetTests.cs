@@ -26,12 +26,13 @@ public partial class FormBrowseGitProcessBudgetTests
     // still read on the UI thread (moving it off caused a selection race; see the perf notes).
     private const int MaxUiThreadGitProcessesWithoutStash = 0;
     private const int MaxUiThreadGitProcessesWithStash = 1;
-    // Measured 10 / 11 in 20 of 20 runs: selecting a commit computes 'branch --contains', 'tag --contains',
+    // Measured 8 / 9 in 20 of 20 runs: selecting a commit computes 'branch --contains', 'tag --contains',
     // 'describe' and 'branch --merged' from the revision grid's reachability index instead of running git.
     // Viewing the file starts one persistent 'cat-file --batch-command' (it remains for the next files) instead of
     // 'ls-tree' and 'cat-file blob', and 'check-attr'.
-    private const int MaxGitProcessesWithoutStash = 10;
-    private const int MaxGitProcessesWithStash = 11;
+    // The conflicts are detected by the status monitor instead of 'ls-files --unmerged', and the only worktree is read from files.
+    private const int MaxGitProcessesWithoutStash = 8;
+    private const int MaxGitProcessesWithStash = 9;
 
     // 'git status' legitimately runs twice: once for the status monitor and once for the worktree diff.
     private const int MaxProcessesPerCommand = 2;

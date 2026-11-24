@@ -46,9 +46,12 @@ public partial class InteractiveGitActionControl
             return;
         }
 
-        if (Module is GitModule gitModule && gitModule.GetIndexKey() is (long, DateTime) indexKey)
+        // The status monitor has injected its result unless the index was changed while git was running: then the
+        // result may be outdated and must not be used for the current index, RefreshGitAction schedules a check.
+        if (Module is GitModule gitModule && gitModule.TryGetCachedConflictedMerge() == hasConflicts)
         {
-            gitModule.InjectConflictCache(indexKey, hasConflicts);
+            // Do not preserve the previous state until a check waiting for this result has noticed it
+            _conflictCheckInProgress = false;
         }
 
         RefreshGitAction(checkForConflicts: true);
@@ -71,11 +74,23 @@ public partial class InteractiveGitActionControl
             IGitModule module = Module;
             _inFlightModule = module;
 
+            // A displayed conflict must not outlive its resolution
+            bool canWait = !_hasConflicts;
+
             ThreadHelper.FileAndForget(async () =>
             {
                 try
                 {
                     await TaskScheduler.Default;
+
+                    if (canWait)
+                    {
+                        await WaitForConflictStateAsync(module, token);
+                        if (token.IsCancellationRequested || IsDisposed || !ReferenceEquals(Module, module))
+                        {
+                            return;
+                        }
+                    }
 
                     bool hasConflicts;
                     try
@@ -117,7 +132,7 @@ public partial class InteractiveGitActionControl
                 {
                     lock (_conflictCheckLock)
                     {
-                        if (ReferenceEquals(_inFlightModule, module))
+                        if (ReferenceEquals(_inFlightModule, module) && !token.IsCancellationRequested)
                         {
                             _conflictCheckInProgress = false;
                         }

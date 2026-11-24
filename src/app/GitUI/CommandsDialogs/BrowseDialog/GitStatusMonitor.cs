@@ -535,13 +535,17 @@ public sealed partial class GitStatusMonitor : IDisposable
             _isFirstPostRepoChanged = false;
         }
 
+        IndexRefresh indexRefresh = new(this, module, noLocks, cancelToken);
+
         ThreadHelper.FileAndForget(async () =>
                 {
                     try
                     {
                         (long Length, DateTime LastWriteTimeUtc)? indexKeyBefore = (module as GitModule)?.GetIndexKey();
+                        (noLocks, cancelToken) = indexRefresh.Begin();
                         ArgumentString cmd = Commands.GetAllChangedFiles(excludeIgnoredFiles: true, UntrackedFilesMode.Default, noLocks: noLocks);
                         ExecutionResult result = await module.GitExecutable.ExecuteAsync(cmd, cancellationToken: cancelToken);
+                        cancelToken = indexRefresh.End(result.ExitedSuccessfully);
 
                         if (result.ExitedSuccessfully && !ModuleHasChanged())
                         {
@@ -567,6 +571,11 @@ public sealed partial class GitStatusMonitor : IDisposable
                     }
                     catch (Exception exception)
                     {
+                        if (indexRefresh.TryFallBack())
+                        {
+                            return;
+                        }
+
                         if (exception.Message?.Contains(BugReportInvoker.DubiousOwnershipSecurityConfigString) is true)
                         {
                             BugReportInvoker.Report(exception, isTerminating: false);
@@ -597,6 +606,8 @@ public sealed partial class GitStatusMonitor : IDisposable
                     }
                     finally
                     {
+                        cancelToken = indexRefresh.CancellationToken;
+
                         lock (_statusSequenceLock)
                         {
                             if (!cancelToken.IsCancellationRequested)
