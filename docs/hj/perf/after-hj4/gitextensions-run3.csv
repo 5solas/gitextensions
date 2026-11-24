@@ -1,0 +1,12 @@
+﻿Index,StartOffsetMs,DurationMs,IsOnMainThread,ExitCode,CommandLine,CallStack
+1,783.9,101.1,False,0,"git for-each-ref --format=""%(push:track,nobracket)::%(upstream:track,nobracket)::%(push)::%(upstream)::%(refname:short)"" refs/heads/",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+2,790.1,79.3,False,0,git ls-files -z --unmerged,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+3,793.3,94.8,False,0,"git --no-optional-locks for-each-ref --format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)%00%(taggerdate:unix)""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+4,889.3,273.4,False,0,"git -c log.showsignature=false log -z --pretty=format:""%H%T%P%n%at%n%ct%n%aN%n%aE%n%cN%n%cE%n%B"" --max-count=100000 --exclude=refs/notes/commits --exclude=refs/agents/** --exclude=refs/sessions/** --e",ProcessWrapper..ctor -> Executable.Start -> GitCommandRunner.RunDetached
+5,889.6,102.7,False,0,git worktree list --porcelain -z,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+6,912.4,205.7,False,0,git --no-optional-locks -c diff.ignoresubmodules=none status --porcelain=2 -z --untracked-files,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+7,1085.2,114.1,False,0,"git branch --format=""%(refname)"" -a --merged ""4e67eb94ab99e29e24bcb2d276004b1f661b5deb""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+8,1092.8,105.2,False,0,git branch --contains 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+9,1198.5,104.2,False,0,git tag --contains 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+10,1303.3,100.6,False,0,git describe --tags --first-parent --abbrev=40 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+11,1339.1,91.9,False,0,git diff-tree --name-only -z --cc --no-commit-id 4e67eb94ab99e29e24bcb2d276004b1f661b5deb,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
