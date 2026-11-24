@@ -16,6 +16,8 @@ public sealed class GitCommandRunner : IGitCommandRunner
         _defaultEncoding = defaultEncoding;
     }
 
+    internal IExecutable Executable => _gitExecutable;
+
     public IProcess RunDetached(
         CancellationToken cancellationToken,
         ArgumentString arguments = default,

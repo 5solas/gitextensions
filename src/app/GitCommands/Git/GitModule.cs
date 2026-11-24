@@ -3607,6 +3607,11 @@ public sealed partial class GitModule : IGitModule
             id.ToString().QuoteNE()
         };
 
+        if (Git.Broker.GitBroker.TryGetFileText(GitExecutable, id, encoding, stripAnsiEscapeCodes, out string? brokerText))
+        {
+            return brokerText;
+        }
+
         ExecutionResult exec = GitExecutable.Execute(args, outputEncoding: encoding, stripAnsiEscapeCodes: stripAnsiEscapeCodes, throwOnErrorExit: false, cache: GitCommandCache);
         if (!exec.ExitedSuccessfully)
         {

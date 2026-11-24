@@ -34,6 +34,11 @@ internal static class GitFileStreamGetter
 
     private static async Task<MemoryStream> CatFileAsync(string blob, IGitCommandRunner gitCommandRunner, CancellationToken cancellationToken)
     {
+        if (await Broker.GitBroker.TryGetBlobStreamAsync(blob, gitCommandRunner, cancellationToken) is MemoryStream brokerStream)
+        {
+            return brokerStream;
+        }
+
         GitArgumentBuilder args = new("cat-file")
         {
                 "blob",

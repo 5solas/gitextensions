@@ -4,6 +4,7 @@ using System.Text;
 using System.Windows.Forms;
 using CommonTestUtils;
 using GitCommands;
+using GitCommands.Git.Broker;
 using GitCommands.Logging;
 using GitExtensions.Extensibility.Git;
 using GitUI;
@@ -25,10 +26,12 @@ public partial class FormBrowseGitProcessBudgetTests
     // still read on the UI thread (moving it off caused a selection race; see the perf notes).
     private const int MaxUiThreadGitProcessesWithoutStash = 0;
     private const int MaxUiThreadGitProcessesWithStash = 1;
-    // Measured 11 / 12 in 20 of 20 runs: selecting a commit computes 'branch --contains', 'tag --contains',
+    // Measured 10 / 11 in 20 of 20 runs: selecting a commit computes 'branch --contains', 'tag --contains',
     // 'describe' and 'branch --merged' from the revision grid's reachability index instead of running git.
-    private const int MaxGitProcessesWithoutStash = 11;
-    private const int MaxGitProcessesWithStash = 12;
+    // Viewing the file starts one persistent 'cat-file --batch-command' (it remains for the next files) instead of
+    // 'ls-tree' and 'cat-file blob', and 'check-attr'.
+    private const int MaxGitProcessesWithoutStash = 10;
+    private const int MaxGitProcessesWithStash = 11;
 
     // 'git status' legitimately runs twice: once for the status monitor and once for the worktree diff.
     private const int MaxProcessesPerCommand = 2;
@@ -57,6 +60,19 @@ public partial class FormBrowseGitProcessBudgetTests
 
         // The budgets must not depend on how fast the revision grid is loaded
         CommitReachabilityTracker.DefaultWaitTimeout = TimeSpan.FromMilliseconds(StepTimeoutMilliseconds);
+    }
+
+    [SetUp]
+    public void SetUp()
+    {
+        GitBroker.Cache.Clear();
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        GitBroker.ReleaseAll();
+        UITest.ProcessUntil("Persistent processes ended", () => GitBrokerStats.RunningProcesses == 0, maxMilliseconds: StepTimeoutMilliseconds);
     }
 
     [OneTimeTearDown]
