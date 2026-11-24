@@ -22,7 +22,8 @@ public sealed partial class GitConfigSnapshotProvider(IExecutable gitExecutable)
 
     public GitConfigSnapshot GetSnapshot()
     {
-        if (_isValid && !_isVerificationRequested && _currentSnapshot is { } currentSnapshot)
+        // The order matters, see IsVerificationPending
+        if (!IsVerificationPending && _isValid && _currentSnapshot is { } currentSnapshot)
         {
             return currentSnapshot;
         }
@@ -38,12 +39,13 @@ public sealed partial class GitConfigSnapshotProvider(IExecutable gitExecutable)
             // If Invalidate() runs while git is reading the config, the result may predate the change:
             // return it to this caller but do not publish it as valid, so the next read loads again.
             int generation = Volatile.Read(ref _generation);
-            GitConfigSnapshot snapshot = LoadOrReuseSnapshot(out ConfigSnapshotPart? part);
+            GitConfigSnapshot snapshot = LoadOrReuseSnapshot(out ConfigSnapshotPart? part, out int answeredVerification);
             if (generation == Volatile.Read(ref _generation))
             {
                 PublishPart(part);
                 _currentSnapshot = snapshot;
                 _isValid = true;
+                CompleteVerification(answeredVerification);
             }
 
             return snapshot;

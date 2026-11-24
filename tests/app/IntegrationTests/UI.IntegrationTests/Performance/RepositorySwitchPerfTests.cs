@@ -6,6 +6,7 @@ using System.Text;
 using CommonTestUtils;
 using GitCommands;
 using GitCommands.Logging;
+using GitCommands.RepoSnapshot;
 using GitExtensions.Extensibility.Git;
 using GitExtUtils;
 using GitUI;
@@ -57,7 +58,10 @@ public sealed class RepositorySwitchPerfTests
         bool collectGarbage = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("HJ_SWITCH_PERF_GC"));
         bool originalLogCaptureCallStacks = AppSettings.LogCaptureCallStacks;
         bool originalShowAuthorAvatarColumn = AppSettings.ShowAuthorAvatarColumn;
-        int originalMemoryLimit = AppSettings.RepoSnapshotMemoryLimit.Value;
+
+        // The stored value, null if the setting is not set: the settings file must not get an entry
+        string memoryLimitName = AppSettings.RepoSnapshotMemoryLimit.FullPath;
+        string? originalMemoryLimit = AppSettings.GetString(memoryLimitName, defaultValue: null);
 
         IServiceContainer serviceContainer = GlobalServiceContainer.CreateDefaultMockServiceContainer();
         GitModule moduleB = new(serviceContainer.GetRequiredService<IGitExecutorProvider>(), workingDirB);
@@ -69,6 +73,8 @@ public sealed class RepositorySwitchPerfTests
 
         List<SwitchResult> results = [];
         using UITestThreadExceptions threadExceptions = new();
+
+        RepoSnapshotStore.Default.Clear();
 
         try
         {
@@ -108,7 +114,8 @@ public sealed class RepositorySwitchPerfTests
         {
             AppSettings.LogCaptureCallStacks = originalLogCaptureCallStacks;
             AppSettings.ShowAuthorAvatarColumn = originalShowAuthorAvatarColumn;
-            AppSettings.RepoSnapshotMemoryLimit.Value = originalMemoryLimit;
+            AppSettings.SetString(memoryLimitName, originalMemoryLimit!);
+            RepoSnapshotStore.Default.Clear();
         }
 
         threadExceptions.ThrowIfAny();

@@ -202,21 +202,40 @@ public sealed class RepoSnapshotStoreTests
     [NonParallelizable]
     public void Default_store_should_use_the_setting()
     {
-        int original = AppSettings.RepoSnapshotMemoryLimit.Value;
+        AppSettings.RepoSnapshotMemoryLimit.Default.Should().Be(1024);
+        using RepoSnapshotTestScope scope = new();
+
+        AppSettings.RepoSnapshotMemoryLimit.Value = AppSettings.RepoSnapshotMemoryLimit.Default;
+        RepoSnapshotStore.Default.IsEnabled.Should().BeTrue();
+
+        AppSettings.RepoSnapshotMemoryLimit.Value = 0;
+        RepoSnapshotStore.Default.IsEnabled.Should().BeFalse();
+
+        AppSettings.RepoSnapshotMemoryLimit.Value = -1;
+        RepoSnapshotStore.Default.IsEnabled.Should().BeFalse();
+    }
+
+    [Test]
+    [NonParallelizable]
+    public void Test_scope_should_restore_the_stored_setting([Values(null, "0", "42")] string? stored)
+    {
+        string name = AppSettings.RepoSnapshotMemoryLimit.FullPath;
+        string? original = AppSettings.GetString(name, defaultValue: null);
         try
         {
-            original.Should().Be(1024);
-            RepoSnapshotStore.Default.IsEnabled.Should().BeTrue();
+            AppSettings.SetString(name, stored!);
+            using (new RepoSnapshotTestScope())
+            {
+                AppSettings.RepoSnapshotMemoryLimit.Value = 1;
+                RepoSnapshotStore.Default.Set("repo", new PartA(1));
+            }
 
-            AppSettings.RepoSnapshotMemoryLimit.Value = 0;
-            RepoSnapshotStore.Default.IsEnabled.Should().BeFalse();
-
-            AppSettings.RepoSnapshotMemoryLimit.Value = -1;
-            RepoSnapshotStore.Default.IsEnabled.Should().BeFalse();
+            AppSettings.GetString(name, defaultValue: null).Should().Be(stored);
+            RepoSnapshotStore.Default.Count.Should().Be(0);
         }
         finally
         {
-            AppSettings.RepoSnapshotMemoryLimit.Value = original;
+            AppSettings.SetString(name, original!);
         }
     }
 
