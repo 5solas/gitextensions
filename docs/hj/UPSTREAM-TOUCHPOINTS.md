@@ -195,3 +195,34 @@ pwsh eng/hj/Sync-Upstream.ps1 -Topics <path>
 - 화면에서 숨긴 ref 는 "포함하는 브랜치/태그" 와 describe 결과에도 나오지 않는다.
 - 결과는 그리드를 로드한 시점의 ref 기준이다. GE 밖에서 ref 를 바꾼 뒤에는 새로고침해야 반영된다.
 - `UseDirectGitBinary` 설정(기본 켬, 설정 파일 키)으로 실제 바이너리 실행을 끌 수 있다. `MSYSTEM` 이 설정돼 있거나 `%USERPROFILE%in` 이 있으면 자동으로 래퍼를 쓴다.
+
+---
+
+## W30 (hj-8) 추가 접점: 저장소 스냅샷, 상주 cat-file, 열기 호출 정리, index 갱신
+
+| upstream 파일 | 추가 줄 | 훅 |
+| :--- | ---: | :--- |
+| `src/app/GitCommands/Git/GitCommandRunner.cs` | 2 | `internal IExecutable Executable` (브로커가 실행 파일을 얻는 용도) |
+| `src/app/GitCommands/Git/GitFileStreamGetter.cs` | 5 | `GitBroker.TryGetBlobStreamAsync` (상주 프로세스가 답했을 때만 조기 반환) |
+| `src/app/GitCommands/Git/GitModule.cs` | 5 | `GetFileText` 의 `GitBroker.TryGetFileText` (답했을 때만 조기 반환) |
+| `src/app/GitUI/Editor/FileViewer.cs` | 5 | `GetUpdateTreeId` 의 `TryUpdateTreeIdFromBroker` (답했을 때만 조기 반환) |
+| `src/app/GitUI/HelperDialogs/FormProcess.cs` | 1 | `GitBroker.ReleaseAll()` — 명령 실행 전 상주 프로세스 종료 |
+| `src/app/GitUI/CommandsDialogs/BrowseDialog/GitStatusMonitor.cs` | 11 | `IndexRefresh` 생성, `Begin` / `End` / `TryFallBack` / 토큰 복구 |
+| `src/app/GitUI/CommandsDialogs/FormBrowse.cs` | 1 | `notificationBarGitActionInProgress.SetStatusUpdateSource(...)` |
+| `src/app/GitUI/LeftPanel/WorktreeTree.cs` | 14 | `WorktreeLazyLoader` (`OnAttached` / `OnDetached` / `OnRefresh` / `TryLoad` / `LoadIfExpanded`) |
+| `tests/.../AppSettingsTests...verified.txt` | 4 | 새 설정 키 4개 |
+| `tests/.../CommandsDialogs/FormBrowseTests.cs` | 7 | `FileSelection_should_be_restored_after_refresh` 의 준비 조건(그리드 선택 타이머 대기) |
+
+저장소 스냅샷(설정·스태시 재사용)은 upstream 소스 파일에 훅이 없다(포크 파일 `GitConfigSnapshotProvider*.cs`, `RevisionGridControl.Stash.cs` 만 변경).
+
+### 동기화 때 직접 대조해야 하는 것
+
+| 포크 파일 | 의존하는 upstream 동작 |
+| :--- | :--- |
+| `GitCommands/RepoSnapshot/StashListReader.cs` | `RevisionReader.GetStashes` 의 출력이 의존하는 입력(로그 포맷이 notes 등을 읽게 바뀌면 비교 대상에 추가) |
+| `GitCommands/Git/Broker/GitBroker.cs` (`TryGetFileText`) | `GitModule.GetFileText` 의 디코딩·ANSI 제거(`ExecutableExtensions.Decode.cs` 가 같은 함수를 호출) |
+| `GitUI/LeftPanel/MainWorktreeReader.cs` | `GitModule.GetWorktrees` 가 만드는 `GitWorktree` 필드 |
+| `GitUI/CommandsDialogs/BrowseDialog/GitStatusMonitor.IndexRefresh.cs` | `GitStatusMonitor.Update` 의 지역 변수 `noLocks`, `cancelToken` 과 finally 흐름 |
+| `GitCommands/Git/IndexRefreshGate.cs` | `GitModule.IsRunningGitProcess` / `IsGitFsMonitorDaemon` 의 프로세스 판정 |
+
+변경 내용과 알려진 한계는 [CHANGELOG.md](CHANGELOG.md) 를 본다.
