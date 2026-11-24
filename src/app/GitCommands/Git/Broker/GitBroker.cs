@@ -17,7 +17,12 @@ public static class GitBroker
     private const int MaxSessions = 8;
     private static readonly TimeSpan _idleTimeout = TimeSpan.FromSeconds(15);
 
+    // Short, because the working directory is locked by the process
+    private static readonly TimeSpan _attributesIdleTimeout = TimeSpan.FromSeconds(3);
+
     internal static GitBrokerPool Pool { get; } = new(_idleTimeout, MaxSessions);
+
+    internal static CheckAttrPool AttributesPool { get; } = new(_attributesIdleTimeout, MaxSessions);
 
     internal static BlobMemoryCache Cache { get; } = new(() => Math.Max(0L, AppSettings.GitBrokerMemoryLimit.Value) * 1024 * 1024);
 
@@ -50,12 +55,59 @@ public static class GitBroker
     }
 
     /// <summary>
+    ///  Gets a module which provides the output of <c>git check-attr</c> for the file without starting a process.
+    /// </summary>
+    /// <returns>The <paramref name="module"/> itself if the persistent process cannot be used.</returns>
+    internal static IGitModule WithAttributes(IGitModule module, string fileName)
+    {
+        if (!AppSettings.UseGitBrokerForAttributes.Value
+            || !IsPlainPath(fileName)
+            || !AttributeFiles.IsSupportedPath(fileName)
+            || !IsSupported(module.GitExecutable, out Executable? git))
+        {
+            return module;
+        }
+
+        // The second attempt is for a process which has been stopped because it was outdated
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            bool isOutdated = false;
+            bool isAnswered = AttributesPool.TryRequest(
+                git,
+                (session, token) =>
+                {
+                    byte[]? response = session.Query(fileName, token);
+                    isOutdated = session.IsStopped;
+                    return response;
+                },
+                CancellationToken.None,
+                out byte[]? output);
+            if (isAnswered)
+            {
+                return KnownAttributesModule.Create(module, output!);
+            }
+
+            if (!isOutdated)
+            {
+                break;
+            }
+        }
+
+        GitBrokerStats.CountFallback();
+        return module;
+    }
+
+    /// <summary>
     ///  Ends all persistent processes without waiting for them, because a command could be hindered by them (e.g. <c>git gc</c>).
     /// </summary>
     /// <remarks>
     ///  All, because worktrees share their objects. The next request starts a process again.
     /// </remarks>
-    public static void ReleaseAll() => Pool.ReleaseAll();
+    public static void ReleaseAll()
+    {
+        Pool.ReleaseAll();
+        AttributesPool.ReleaseAll();
+    }
 
     /// <summary>
     ///  Gets the content of a blob as the output of <c>git cat-file blob</c> would be decoded.

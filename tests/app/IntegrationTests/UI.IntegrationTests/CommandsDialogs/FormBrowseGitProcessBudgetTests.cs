@@ -29,7 +29,8 @@ public partial class FormBrowseGitProcessBudgetTests
     // Measured 8 / 9 in 20 of 20 runs: selecting a commit computes 'branch --contains', 'tag --contains',
     // 'describe' and 'branch --merged' from the revision grid's reachability index instead of running git.
     // Viewing the file starts one persistent 'cat-file --batch-command' (it remains for the next files) instead of
-    // 'ls-tree' and 'cat-file blob'. 'check-attr' is still run for each file.
+    // 'ls-tree' and 'cat-file blob', and another persistent one instead of 'check-attr'
+    // (a single 'check-attr' if a file has been changed less than 2 seconds ago).
     // The conflicts are detected by the status monitor instead of 'ls-files --unmerged', and the only worktree is read from files.
     private const int MaxGitProcessesWithoutStash = 8;
     private const int MaxGitProcessesWithStash = 9;

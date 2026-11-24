@@ -23,11 +23,11 @@ internal sealed class GitBrokerRepository
     };
 
     private readonly GitConfigSnapshot _snapshot;
-    private readonly ConfigSnapshotPart? _part;
+    private readonly ConfigSnapshotPart _part;
     private readonly string _gitCommand;
     private readonly ConfigFileState? _config;
 
-    private GitBrokerRepository(GitConfigSnapshot snapshot, ConfigSnapshotPart? part, string gitCommand, string gitDir, ConfigFileState? config, bool isSupported)
+    private GitBrokerRepository(GitConfigSnapshot snapshot, ConfigSnapshotPart part, string gitCommand, string gitDir, ConfigFileState? config, bool isSupported)
     {
         _snapshot = snapshot;
         _part = part;
@@ -69,16 +69,16 @@ internal sealed class GitBrokerRepository
         if (provider is null || !provider.TryGetKnownSnapshot(out GitConfigSnapshot? snapshot, out ConfigSnapshotPart? part))
         {
             // The application will read the config again, but it is known that it is still the same
-            return isUnchanged && known!._part?.IsCurrent() is true ? known : null;
+            return isUnchanged && known!._part.IsCurrent() ? known : null;
         }
 
-        if (!ReferenceEquals(known?._snapshot, snapshot))
+        if (part is null)
         {
-            return Create(gitExecutable, snapshot, part, isOutdated: false);
+            // It is not known whether the config has been changed after it has been read
+            return null;
         }
 
-        // The config file could have been changed after the snapshot has been read
-        return isUnchanged ? known : Create(gitExecutable, snapshot, part, isOutdated: part is null);
+        return isUnchanged && ReferenceEquals(known!._snapshot, snapshot) ? known : Create(gitExecutable, snapshot, part);
     }
 
     /// <summary>
@@ -86,6 +86,13 @@ internal sealed class GitBrokerRepository
     /// </summary>
     public bool HasSameProcess(GitBrokerRepository? other)
         => other is not null && GitDir == other.GitDir && _gitCommand == other._gitCommand && _config == other._config;
+
+    /// <summary>
+    ///  Gets whether <paramref name="other"/> is based on the same config.
+    /// </summary>
+    public bool HasSameConfig(GitBrokerRepository? other) => ReferenceEquals(_snapshot, other?._snapshot);
+
+    public string? GetConfigValue(string normalizedName) => _snapshot.GetEffectiveValue(normalizedName);
 
     /// <summary>
     ///  Gets whether git has read the local config and nothing in it lets a process run commands or is unknown.
@@ -113,7 +120,7 @@ internal sealed class GitBrokerRepository
         static bool Is(string value, string expected) => value.Equals(expected, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static GitBrokerRepository Create(Executable gitExecutable, GitConfigSnapshot snapshot, ConfigSnapshotPart? part, bool isOutdated)
+    private static GitBrokerRepository Create(Executable gitExecutable, GitConfigSnapshot snapshot, ConfigSnapshotPart part)
     {
         GitBrokerStats.CountEvaluation();
         string gitDir = "";
@@ -128,8 +135,7 @@ internal sealed class GitBrokerRepository
             if (!PathUtil.IsWslPath(gitDir) && File.Exists(Path.Combine(gitDir, "HEAD")))
             {
                 config = ConfigFileState.TryRead(Path.Combine(resolver.ResolveCommonDir(gitDir), "config"));
-                isSupported = !isOutdated
-                    && config is not null
+                isSupported = config is not null
                     && IsConfigSupported(snapshot)
                     && Git.GitVersion.CurrentVersion(gitExecutable) is GitVersion version
                     && version >= _minGitVersion;

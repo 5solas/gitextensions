@@ -54,6 +54,9 @@ public sealed class FileViewerGitBrokerTests
         }
 
         ObjectId commitId = _repository.Module.GetCurrentCheckout();
+
+        // The attributes are read by git itself while the index has just been changed
+        File.SetLastWriteTimeUtc(Path.Combine(_repository.Module.WorkingDirGitDir, "index"), DateTime.UtcNow.AddHours(-1));
         Dictionary<string, string> texts = [];
         List<CommandLogEntry> commands = [];
 
@@ -67,9 +70,9 @@ public sealed class FileViewerGitBrokerTests
         });
 
         texts.Should().BeEquivalentTo(files.ToDictionary(f => f, f => $"content of {f}"));
-        commands.Should().ContainSingle(c => c.Arguments.EndsWith("cat-file --batch-command"));
-        commands.Where(c => !c.Arguments.EndsWith("cat-file --batch-command")).Should().HaveCount(files.Length)
-            .And.OnlyContain(c => c.Arguments.StartsWith("check-attr"));
+        commands.Should().HaveCount(2)
+            .And.ContainSingle(c => c.Arguments.EndsWith("cat-file --batch-command"))
+            .And.ContainSingle(c => c.Arguments.Contains("check-attr --stdin"));
         commands.Should().OnlyContain(c => !c.IsOnMainThread);
     }
 

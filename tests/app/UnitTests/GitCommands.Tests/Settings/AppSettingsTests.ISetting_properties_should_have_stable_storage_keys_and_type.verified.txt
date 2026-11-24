@@ -62,4 +62,5 @@ BooleanSetting UseConsoleEmulatorForCommands = UseConsoleEmulatorForCommands
 BooleanSetting UseDiffViewerForBlame = Detailed.UseDiffViewerForBlame
 BooleanSetting UseDirectGitBinary = UseDirectGitBinary
 BooleanSetting UseGitBroker = UseGitBroker
+BooleanSetting UseGitBrokerForAttributes = UseGitBrokerForAttributes
 BooleanSetting UseGitColoring = Appearance.UseGitColoring

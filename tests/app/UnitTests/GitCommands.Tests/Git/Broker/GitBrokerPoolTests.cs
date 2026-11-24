@@ -323,6 +323,7 @@ public sealed class GitBrokerPoolTests
     public void TryRequest_should_not_support_a_repository_set_by_the_environment(string name)
     {
         Request().Should().Be("blob");
+        string? originalValue = Environment.GetEnvironmentVariable(name);
         Environment.SetEnvironmentVariable(name, _scope.Module.WorkingDirGitDir);
         try
         {
@@ -330,7 +331,7 @@ public sealed class GitBrokerPoolTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable(name, null);
+            Environment.SetEnvironmentVariable(name, originalValue);
         }
     }
 
@@ -403,6 +404,7 @@ public sealed class GitBrokerPoolTests
             ("GIT_CONFIG_GLOBAL", Path.Combine(_scope.Module.WorkingDirGitDir, "missing.cfg")),
             ("GIT_CONFIG_NOSYSTEM", "1"),
         ];
+        string?[] originalValues = [.. variables.Select(v => Environment.GetEnvironmentVariable(v.Name))];
         foreach ((string name, string value) in variables)
         {
             Environment.SetEnvironmentVariable(name, value);
@@ -418,9 +420,9 @@ public sealed class GitBrokerPoolTests
         }
         finally
         {
-            foreach ((string name, string _) in variables)
+            for (int i = 0; i < variables.Length; i++)
             {
-                Environment.SetEnvironmentVariable(name, null);
+                Environment.SetEnvironmentVariable(variables[i].Name, originalValues[i]);
             }
         }
 
@@ -434,12 +436,16 @@ public sealed class GitBrokerPoolTests
         using GitModuleTestHelper helper = new();
         GitModule module = helper.Module;
         module.GitExecutable.GetOutput("commit --quiet --allow-empty -m commit");
-        GitModule unread = new(new GitExecutorProvider(new GitDirectoryResolver()), module.WorkingDir);
+
+        // The config of the helper is read in the background some time after it has been set up
+        string workingDir = Path.Combine(helper.TemporaryPath, "clone");
+        module.GitExecutable.GetOutput($"clone --quiet . \"{workingDir}\"");
+        GitModule unread = new(new GitExecutorProvider(new GitDirectoryResolver()), workingDir);
         CommandLog.Clear();
 
         RequestHead().Should().BeFalse();
 
-        CommandLog.Commands.Should().BeEmpty();
+        CommandLog.Commands.Where(c => c.WorkingDir.Contains("clone") || c.Arguments.Contains("clone")).Should().BeEmpty();
         unread.GetEffectiveSetting("core.autocrlf");
         RequestHead().Should().BeTrue();
         _pool.ReleaseAll();
@@ -465,7 +471,7 @@ public sealed class GitBrokerPoolTests
     }
 
     [Test]
-    public void TryRequest_should_work_if_the_config_is_not_reused_by_the_application()
+    public void TryRequest_should_not_use_a_config_which_cannot_be_verified()
     {
         string? original = AppSettings.GetString(AppSettings.RepoSnapshotMemoryLimit.FullPath, defaultValue: null);
         try
@@ -474,17 +480,34 @@ public sealed class GitBrokerPoolTests
             RepoSnapshotStore.Default.Clear();
             _scope.ReadConfig();
 
-            Request().Should().Be("blob");
-            _scope.Git("config remote.x.promisor true");
-            Request().Should().BeNull("the file has been changed");
-            Request().Should().BeNull("the config is still the old one");
-            _scope.ReadConfig();
+            Request().Should().BeNull("a change after the config has been read would not be noticed");
             Request().Should().BeNull();
         }
         finally
         {
             AppSettings.SetString(AppSettings.RepoSnapshotMemoryLimit.FullPath, original!);
         }
+
+        _scope.ReadConfig();
+        Request().Should().Be("blob", "it must not be remembered");
+    }
+
+    [Test]
+    public void TryRequest_should_not_use_an_outdated_config_which_includes_a_recent_file()
+    {
+        // The state of this file is not known for sure: git may have read it before it has been changed
+        string included = Path.Combine(_scope.Module.WorkingDirGitDir, "included.cfg");
+        File.WriteAllText(included, "[hj]\n\ttest = 1\n");
+        _scope.Git("config include.path included.cfg");
+        _scope.ReadConfig();
+        int starts = GitBrokerStats.Starts;
+
+        // Neither the config in memory nor the main config file tells about it
+        File.WriteAllText(included, "[remote \"x\"]\n\tpromisor = true\n");
+
+        Request().Should().BeNull();
+        Request().Should().BeNull();
+        GitBrokerStats.Starts.Should().Be(starts);
     }
 
     [Test]
