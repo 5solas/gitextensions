@@ -13,12 +13,21 @@ namespace GitExtensions.UITests;
 /// </remarks>
 internal sealed class UITestThreadExceptions : IDisposable
 {
+    private const BindingFlags _bindingFlags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+
     private readonly List<Exception> _exceptions = [];
     private readonly ThreadExceptionEventHandler? _previousHandler;
 
+    /// <exception cref="InvalidOperationException">
+    ///  The current handler cannot be determined: it would be lost, so the test must not be run.
+    /// </exception>
     public UITestThreadExceptions()
     {
-        _previousHandler = GetCurrentHandler();
+        if (!TryGetHandler(GetCurrentThreadContext(), out _previousHandler))
+        {
+            throw new InvalidOperationException($"The {nameof(Application.ThreadException)} handler of the thread cannot be determined, WinForms has changed.");
+        }
+
         Application.ThreadException += OnThreadException;
     }
 
@@ -43,22 +52,29 @@ internal sealed class UITestThreadExceptions : IDisposable
         }
     }
 
-    private static ThreadExceptionEventHandler? GetCurrentHandler()
-    {
-        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
-
-        object? context = typeof(Application).GetNestedType("ThreadContext", flags)
-            ?.GetMethod("FromCurrent", flags, [])
+    internal static object? GetCurrentThreadContext()
+        => typeof(Application).GetNestedType("ThreadContext", _bindingFlags)
+            ?.GetMethod("FromCurrent", _bindingFlags, [])
             ?.Invoke(obj: null, parameters: null);
-        for (Type? type = context?.GetType(); type is not null; type = type.BaseType)
+
+    /// <summary>
+    ///  Gets the handler of the thread of <paramref name="threadContext"/>, <see langword="null"/> if none is registered.
+    /// </summary>
+    /// <returns><see langword="false"/> if it cannot be determined whether a handler is registered.</returns>
+    internal static bool TryGetHandler(object? threadContext, out ThreadExceptionEventHandler? handler)
+    {
+        handler = null;
+        for (Type? type = threadContext?.GetType(); type is not null; type = type.BaseType)
         {
-            if (type.GetField("_threadExceptionHandler", flags) is FieldInfo field)
+            if (type.GetField("_threadExceptionHandler", _bindingFlags) is FieldInfo field
+                && typeof(ThreadExceptionEventHandler).IsAssignableFrom(field.FieldType))
             {
-                return (ThreadExceptionEventHandler?)field.GetValue(context);
+                handler = (ThreadExceptionEventHandler?)field.GetValue(threadContext);
+                return true;
             }
         }
 
-        return null;
+        return false;
     }
 
     private static void LogThreadException(object sender, ThreadExceptionEventArgs e)

@@ -17,6 +17,7 @@ public sealed class StashListReaderTests
     private static readonly IGitExecutorProvider _executorProvider = new GitExecutorProvider(new GitDirectoryResolver());
 
     private GitModuleTestHelper _helper = null!;
+    private RepoSnapshotTestScope _scope = null!;
 
     private string GitDir => Path.Combine(_helper.Module.WorkingDir, ".git");
 
@@ -25,6 +26,7 @@ public sealed class StashListReaderTests
     [SetUp]
     public void SetUp()
     {
+        _scope = new RepoSnapshotTestScope();
         _helper = new GitModuleTestHelper();
         RunGit("commit --allow-empty -m initial");
         _helper.CreateRepoFile("file.txt", "initial");
@@ -39,7 +41,7 @@ public sealed class StashListReaderTests
     [TearDown]
     public void TearDown()
     {
-        AppSettings.RepoSnapshotMemoryLimit.Value = AppSettings.RepoSnapshotMemoryLimit.Default;
+        _scope.Dispose();
         _helper.Dispose();
     }
 

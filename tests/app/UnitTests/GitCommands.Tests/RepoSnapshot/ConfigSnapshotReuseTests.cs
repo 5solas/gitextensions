@@ -19,9 +19,11 @@ public sealed class ConfigSnapshotReuseTests
     private const string SettingName = "hj.test";
     private const string GlobalConfigVariable = "GIT_CONFIG_GLOBAL";
 
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
     private static readonly IGitExecutorProvider _executorProvider = new GitExecutorProvider(new GitDirectoryResolver());
 
     private GitModuleTestHelper _helper = null!;
+    private RepoSnapshotTestScope _scope = null!;
     private string _workingDir = null!;
     private string? _originalGlobalConfig;
 
@@ -33,6 +35,7 @@ public sealed class ConfigSnapshotReuseTests
     public void SetUp()
     {
         _originalGlobalConfig = Environment.GetEnvironmentVariable(GlobalConfigVariable);
+        _scope = new RepoSnapshotTestScope();
         _helper = new GitModuleTestHelper();
 
         // Another working directory than the one of the module of the helper, which keeps its settings alive
@@ -45,7 +48,7 @@ public sealed class ConfigSnapshotReuseTests
     public void TearDown()
     {
         Environment.SetEnvironmentVariable(GlobalConfigVariable, _originalGlobalConfig);
-        AppSettings.RepoSnapshotMemoryLimit.Value = AppSettings.RepoSnapshotMemoryLimit.Default;
+        _scope.Dispose();
         _helper.Dispose();
     }
 
@@ -249,6 +252,131 @@ public sealed class ConfigSnapshotReuseTests
             CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
         }
     }
+
+    [Test]
+    public async Task Outdated_config_should_not_be_returned_while_another_thread_verifies_it()
+    {
+        GitModule module = CreateModule();
+        module.GetEffectiveSetting(SettingName).Should().Be("initial");
+        GitConfigSnapshotProvider provider = module.ConfigSnapshotProvider;
+        ChangeConfig("changed");
+
+        using ManualResetEventSlim verificationStarted = new();
+        using ManualResetEventSlim continueVerification = new();
+        provider.IsPartCurrent = part =>
+        {
+            verificationStarted.Set();
+            continueVerification.Wait(_timeout).Should().BeTrue();
+            return part.IsCurrent();
+        };
+
+        // Switch back to the repository
+        provider.RequestVerification();
+        Task<string?> verifyingReader = Task.Run(() => GetValue(provider));
+        Task<string?> concurrentReader;
+        try
+        {
+            verificationStarted.Wait(_timeout).Should().BeTrue();
+            concurrentReader = Task.Run(() => GetValue(provider));
+
+            // The reader has to wait for the verification
+            await Task.WhenAny(concurrentReader, Task.Delay(TimeSpan.FromMilliseconds(500)));
+            concurrentReader.IsCompleted.Should().BeFalse("the config has not been verified yet");
+        }
+        finally
+        {
+            continueVerification.Set();
+        }
+
+        (await verifyingReader.WaitAsync(_timeout)).Should().Be("changed");
+        (await concurrentReader.WaitAsync(_timeout)).Should().Be("changed");
+    }
+
+    [Test]
+    public void Request_during_verification_should_not_be_lost()
+    {
+        GitModule module = CreateModule();
+        module.GetEffectiveSetting(SettingName).Should().Be("initial");
+        GitConfigSnapshotProvider provider = module.ConfigSnapshotProvider;
+        bool isFirst = true;
+        provider.IsPartCurrent = part =>
+        {
+            bool isCurrent = part.IsCurrent();
+            if (isFirst)
+            {
+                // Changed after the files have been read
+                isFirst = false;
+                ChangeConfig("changed");
+                provider.RequestVerification();
+            }
+
+            return isCurrent;
+        };
+
+        provider.RequestVerification();
+        GetValue(provider).Should().Be("initial");
+        isFirst.Should().BeFalse();
+
+        GetValue(provider).Should().Be("changed");
+    }
+
+    [Test]
+    public void Request_while_stored_config_is_reused_should_not_be_lost()
+    {
+        ReadAndCollect().Should().Be("initial");
+        GitModule module = CreateModule();
+        GitConfigSnapshotProvider provider = module.ConfigSnapshotProvider;
+        bool isFirst = true;
+        provider.IsPartCurrent = part =>
+        {
+            bool isCurrent = part.IsCurrent();
+            if (isFirst)
+            {
+                isFirst = false;
+                ChangeConfig("changed");
+                provider.RequestVerification();
+            }
+
+            return isCurrent;
+        };
+
+        GetValue(provider).Should().Be("initial");
+        isFirst.Should().BeFalse();
+
+        GetValue(provider).Should().Be("changed");
+    }
+
+    [Test]
+    public void Verification_should_be_done_once_per_request()
+    {
+        GitModule module = CreateModule();
+        module.GetEffectiveSetting(SettingName).Should().Be("initial");
+        GitConfigSnapshotProvider provider = module.ConfigSnapshotProvider;
+        int count = 0;
+        provider.IsPartCurrent = part =>
+        {
+            count++;
+            return part.IsCurrent();
+        };
+
+        GetValue(provider);
+        count.Should().Be(0);
+
+        provider.RequestVerification();
+        provider.RequestVerification();
+        GetValue(provider);
+        GetValue(provider);
+        count.Should().Be(1);
+
+        provider.RequestVerification();
+        GetValue(provider);
+        GetValue(provider);
+        count.Should().Be(2);
+    }
+
+    private static string? GetValue(GitConfigSnapshotProvider provider) => provider.GetSnapshot().GetEffectiveValue(SettingName);
+
+    private void ChangeConfig(string value) => File.WriteAllText(ConfigFile, File.ReadAllText(ConfigFile).Replace("initial", value));
 
     private static int CountConfigLists()
         => CommandLog.Commands.Count(c => c.Arguments.Contains("config list") || c.Arguments.Contains("config --list"));
