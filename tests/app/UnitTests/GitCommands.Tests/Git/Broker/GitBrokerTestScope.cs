@@ -29,6 +29,7 @@ internal sealed class GitBrokerTestScope : IDisposable
         Git("config core.autocrlf false");
         GitModule.GitCommandCache.Clear();
         GitBroker.Cache.Clear();
+        ReadConfig();
     }
 
     public GitModule Module => _helper.Module;
@@ -50,6 +51,29 @@ internal sealed class GitBrokerTestScope : IDisposable
             stopwatch.Elapsed.Should().BeLessThan(_waitTimeout, because);
             Thread.Sleep(10);
         }
+    }
+
+    /// <summary>
+    ///  Reads the config as the application does when a repository is opened, the broker depends on it.
+    /// </summary>
+    public void ReadConfig()
+    {
+        Module.InvalidateGitSettings();
+        Module.GetEffectiveSetting("core.autocrlf");
+    }
+
+    /// <summary>
+    ///  Lets the repository include a config with a promisor remote: git would run a command to fetch missing objects.
+    /// </summary>
+    /// <returns>The file which is created by the command.</returns>
+    public string IncludePromisorRemote()
+    {
+        string marker = Path.Combine(_helper.TemporaryPath, "marker.txt");
+        File.WriteAllText(
+            Path.Combine(Module.WorkingDirGitDir, "extra.cfg"),
+            $"[remote \"x\"]\n\turl = ssh://localhost/repo\n\tpromisor = true\n[core]\n\tsshCommand = \"echo run > '{marker.ToPosixPath()}' #\"\n");
+        File.AppendAllText(Path.Combine(Module.WorkingDirGitDir, "config"), "\n[include]\n\tpath = extra.cfg\n");
+        return marker;
     }
 
     public string Git(string arguments) => Module.GitExecutable.GetOutput(arguments).Trim();
@@ -88,6 +112,7 @@ internal sealed class GitBrokerTestScope : IDisposable
         AppSettings.SetString(AppSettings.GitBrokerMemoryLimit.FullPath, _originalMemoryLimit!);
         GitBroker.ReleaseAll();
         GitBroker.Cache.Clear();
+        WaitUntil(() => GitBrokerStats.RunningProcesses == 0, "no process may use the repository");
         _helper.Dispose();
     }
 }

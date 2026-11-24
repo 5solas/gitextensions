@@ -63,6 +63,37 @@ public sealed partial class GitConfigSnapshotProvider
         return _isValid && part is not null && ReferenceEquals(part.Snapshot, _currentSnapshot) && part.IsCurrent();
     }
 
+    /// <summary>
+    ///  Gets the last config which has been read, not necessarily up to date.
+    /// </summary>
+    internal GitConfigSnapshot? PeekSnapshot() => _currentSnapshot;
+
+    /// <summary>
+    ///  Gets the current config unless it is known to be outdated or has to be verified, never runs git.
+    /// </summary>
+    /// <param name="part">Contains the state which the config depends on, <see langword="null"/> if this is unknown.</param>
+    internal bool TryGetKnownSnapshot([NotNullWhen(true)] out GitConfigSnapshot? snapshot, out ConfigSnapshotPart? part)
+    {
+        // The order matters, see IsVerificationPending
+        bool isVerificationPending = IsVerificationPending;
+        bool isValid = _isValid;
+        snapshot = _currentSnapshot;
+        part = _currentPart;
+        if (!isValid || snapshot is null)
+        {
+            part = null;
+            return false;
+        }
+
+        if (part is not null && ReferenceEquals(part.Snapshot, snapshot))
+        {
+            return part.IsCurrent();
+        }
+
+        part = null;
+        return !isVerificationPending;
+    }
+
     /// <remarks>Must be called within the lock.</remarks>
     private void VerifyCurrentSnapshotIfRequested()
     {

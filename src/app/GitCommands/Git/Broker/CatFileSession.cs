@@ -11,18 +11,22 @@ namespace GitCommands.Git.Broker;
 /// </summary>
 /// <remarks>
 ///  Requests must not be sent concurrently.
-///  If anything but a complete and expected response has been read (cancellation, timeout, error), the session is stopped,
+///  If anything but a complete and expected response has been read (timeout, error), the session is stopped,
 ///  because the remaining part of the response would be taken for the next one.
 /// </remarks>
 internal sealed class CatFileSession : IDisposable
 {
     private const int MaxHeaderLength = 64 * 1024;
     private const long MaxContentLength = 256 * 1024 * 1024;
+    private const long MaxCancelledContentLength = 1024 * 1024;
     private const long MinBytesPerSecond = 1024 * 1024;
 
     // The start of the process can take long, e.g. because of a virus scanner
     private static readonly TimeSpan _defaultFirstResponseTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan _responseTimeout = TimeSpan.FromSeconds(10);
+
+    // A response which is complete soon is read to its end after a cancellation, because another process start takes longer
+    private static readonly TimeSpan _cancelledResponseTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly UTF8Encoding _encoding = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     private readonly BrokerProcess _process;
@@ -45,16 +49,20 @@ internal sealed class CatFileSession : IDisposable
     /// <remarks>
     ///  The current directory of the process is not the one of the repository,
     ///  because it could not be moved or deleted while the process is running.
+    ///  Missing objects are not fetched (which could run commands set in the config of the repository): the option sets
+    ///  GIT_NO_LAZY_FETCH for this process. It ends at once if git does not know the option.
     /// </remarks>
-    public static CatFileSession Start(Executable gitExecutable, string gitDir)
+    public static CatFileSession Start(Executable gitExecutable, string gitDir) => new(StartProcess(gitExecutable, gitDir));
+
+    internal static IProcess StartProcess(Executable gitExecutable, string gitDir)
     {
         Executable executable = new(gitExecutable.Command, Environment.SystemDirectory);
-        GitArgumentBuilder args = new("cat-file", gitOptions: (ArgumentString)$"--git-dir={gitDir.ToPosixPath().TrimEnd('/').Quote()}")
+        GitArgumentBuilder args = new("cat-file", gitOptions: (ArgumentString)$"--git-dir={gitDir.ToPosixPath().TrimEnd('/').Quote()} --no-lazy-fetch")
         {
             "--batch-command"
         };
 
-        return new CatFileSession(executable.Start(args, redirectInput: true, redirectOutput: true, outputEncoding: _encoding, throwOnErrorExit: false));
+        return executable.Start(args, redirectInput: true, redirectOutput: true, outputEncoding: _encoding, throwOnErrorExit: false);
     }
 
     /// <summary>
@@ -63,7 +71,7 @@ internal sealed class CatFileSession : IDisposable
     /// <param name="objectName">Any name of an object as supported by git.</param>
     /// <returns><see langword="null"/> if the object is missing or the name is not supported.</returns>
     /// <exception cref="GitBrokerException">The session is stopped.</exception>
-    /// <exception cref="OperationCanceledException">Also stops the session if the request has been sent.</exception>
+    /// <exception cref="OperationCanceledException">Also stops the session if the response cannot be completed soon.</exception>
     public GitObjectInfo? GetInfo(string objectName, CancellationToken cancellationToken)
         => TryGetRequest("info", objectName, out byte[] request)
             ? Execute(request, _ => ReadHeader(objectName), cancellationToken)
@@ -74,7 +82,7 @@ internal sealed class CatFileSession : IDisposable
     /// </summary>
     /// <returns><see langword="null"/> if the object is missing, not a blob, or too large.</returns>
     /// <exception cref="GitBrokerException">The session is stopped.</exception>
-    /// <exception cref="OperationCanceledException">Also stops the session if the request has been sent.</exception>
+    /// <exception cref="OperationCanceledException">Also stops the session if the response cannot be completed soon.</exception>
     public byte[]? GetBlob(ObjectId objectId, CancellationToken cancellationToken)
     {
         string name = objectId.ToString();
@@ -101,6 +109,17 @@ internal sealed class CatFileSession : IDisposable
             }
 
             timeout.CancelAfter(_responseTimeout + TimeSpan.FromSeconds(info.Size / MinBytesPerSecond));
+
+            // If it is cancelled after this check, the time is limited by the cancellation
+            if (cancellationToken.IsCancellationRequested)
+            {
+                timeout.CancelAfter(_cancelledResponseTimeout);
+                if (info.Size > MaxCancelledContentLength)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+            }
+
             byte[] content = new byte[info.Size];
             ReadExactly(content);
             if (ReadByte() != '\n')
@@ -146,18 +165,19 @@ internal sealed class CatFileSession : IDisposable
             throw new GitBrokerException("The process has been stopped");
         }
 
-        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_timeout);
+        using CancellationTokenSource timeout = new(_timeout);
         _timeout = _responseTimeout;
+        using CancellationTokenRegistration cancellation = cancellationToken.Register(() => timeout.CancelAfter(_cancelledResponseTimeout));
 
         // Unblocks the read and write operations
         using CancellationTokenRegistration registration = timeout.Token.Register(() => _process.Stop(kill: true));
+        T result;
         try
         {
             GitBrokerStats.CountRequest();
             _process.Input.Write(request);
             _process.Input.Flush();
-            return readResponse(timeout);
+            result = readResponse(timeout);
         }
         catch (Exception ex)
         {
@@ -165,6 +185,10 @@ internal sealed class CatFileSession : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             throw ex as GitBrokerException ?? new GitBrokerException("Request failed", ex);
         }
+
+        // The response is complete: the session remains usable
+        cancellationToken.ThrowIfCancellationRequested();
+        return result;
     }
 
     private GitObjectInfo? ReadHeader(string objectName)

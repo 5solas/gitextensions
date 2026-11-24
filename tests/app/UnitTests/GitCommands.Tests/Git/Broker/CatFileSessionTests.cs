@@ -1,5 +1,10 @@
-﻿using System.Text;
+﻿using System.Diagnostics;
+using System.Text;
+using GitCommands;
+using GitCommands.Git;
 using GitCommands.Git.Broker;
+using GitCommands.Git.Extensions;
+using GitCommands.Logging;
 using GitExtensions.Extensibility;
 using GitExtensions.Extensibility.Git;
 
@@ -136,6 +141,67 @@ public sealed class CatFileSessionTests
     }
 
     [Test]
+    public void Cancelled_request_should_not_stop_the_session_if_the_response_is_complete_soon()
+    {
+        using CancellationTokenSource cancellation = new();
+        using BlockingProcess process = new($"{Id1} blob 10\n", thenEach: [cancellation.Cancel, null], responses: ["0123456789\n", $"{Id1} blob 2\nab\n"]);
+        using CatFileSession session = new(process);
+
+        Action request = () => session.GetBlob(ObjectId.Parse(Id1), cancellation.Token);
+
+        request.Should().Throw<OperationCanceledException>();
+        session.IsStopped.Should().BeFalse();
+        session.GetBlob(ObjectId.Parse(Id1), CancellationToken.None).Should().Equal("ab"u8.ToArray(), "the first response must have been read");
+    }
+
+    [Test]
+    public void Cancelled_request_should_stop_the_session_if_the_response_is_large()
+    {
+        using CancellationTokenSource cancellation = new();
+        using BlockingProcess process = new(thenEach: [cancellation.Cancel], responses: [$"{Id1} blob 10000000\n"]);
+        using CatFileSession session = new(process);
+
+        Action request = () => session.GetBlob(ObjectId.Parse(Id1), cancellation.Token);
+
+        request.Should().Throw<OperationCanceledException>();
+        session.IsStopped.Should().BeTrue();
+        process.ReadCountAtEnd.Should().Be(0, "the content must not be waited for");
+    }
+
+    [Test]
+    public void Missing_object_should_not_be_fetched()
+    {
+        _scope.Commit("file", "text");
+        string marker = _scope.IncludePromisorRemote();
+        using (CatFileSession session = _scope.StartSession())
+        {
+            session.GetInfo($"{Id1}:file", CancellationToken.None).Should().BeNull();
+            session.GetBlob(ObjectId.Parse(Id1), CancellationToken.None).Should().BeNull();
+            session.IsStopped.Should().BeFalse();
+        }
+
+        GitBrokerTestScope.WaitUntil(() => GitBrokerStats.RunningProcesses == 0, "the process must end");
+        File.Exists(marker).Should().BeFalse("the command of the config must not be run");
+
+        // The check of the test: other git processes run it
+        _scope.Module.GitExecutable.Execute($"cat-file -t {Id1}", throwOnErrorExit: false).ExitedSuccessfully.Should().BeFalse();
+        File.Exists(marker).Should().BeTrue();
+    }
+
+    [Test]
+    public void Command_line_should_be_known_as_a_persistent_process()
+    {
+        CommandLog.Clear();
+        using CatFileSession session = _scope.StartSession();
+        session.GetInfo("HEAD", CancellationToken.None);
+
+        CommandLogEntry command = CommandLog.Commands.Should().ContainSingle().Subject;
+        IndexRefreshGate.IsPersistentProcess($"\"C:\\Program Files\\Git\\git.exe\" {command.Arguments}").Should().BeTrue();
+        using Process process = Process.GetProcessById(command.ProcessId!.Value);
+        IndexRefreshGate.IsPersistentProcess(process.TryGetCommandLine()).Should().BeTrue();
+    }
+
+    [Test]
     public void Request_cancelled_before_should_not_stop_the_session()
     {
         ObjectId blobId = _scope.AddBlob("text"u8.ToArray());
@@ -226,11 +292,13 @@ public sealed class CatFileSessionTests
         private readonly TaskCompletionSource<int> _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly ManualResetEventSlim _killed = new();
 
-        public BlockingProcess(string response = "", bool endsAfterResponse = false, Action? atEnd = null)
+        public BlockingProcess(string response = "", bool endsAfterResponse = false, Action? atEnd = null, Action?[]? thenEach = null, string[]? responses = null)
         {
             StandardInput = new StreamWriter(new MemoryStream());
-            StandardOutput = new StreamReader(new ResponseStream(this, Encoding.ASCII.GetBytes(response), endsAfterResponse, atEnd));
+            StandardOutput = new StreamReader(new ResponseStream(this, Encoding.ASCII.GetBytes(response), endsAfterResponse, atEnd, thenEach ?? [], responses ?? []));
         }
+
+        public int ReadCountAtEnd { get; private set; }
 
         public StreamWriter StandardInput { get; }
 
@@ -256,27 +324,51 @@ public sealed class CatFileSessionTests
 
         public void WaitForInputIdle() => throw new NotSupportedException();
 
-        private sealed class ResponseStream(BlockingProcess process, byte[] response, bool endsAfterResponse, Action? atEnd) : MemoryStream(response)
+        private sealed class ResponseStream(BlockingProcess process, byte[] response, bool endsAfterResponse, Action? atEnd, Action?[] thenEach, string[] responses) : Stream
         {
-            public override int Read(Span<byte> buffer)
-            {
-                // Not MemoryStream.Read(Span<byte>), which calls this method
-                byte[] bytes = new byte[buffer.Length];
-                int count = Read(bytes, 0, bytes.Length);
-                bytes.AsSpan(0, count).CopyTo(buffer);
-                return count;
-            }
+            private byte[] _current = response;
+            private int _position;
+            private int _next;
 
-            public override int Read(byte[] buffer, int offset, int bufferLength)
+            public override bool CanRead => true;
+
+            public override bool CanSeek => false;
+
+            public override bool CanWrite => false;
+
+            public override long Length => throw new NotSupportedException();
+
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+            public override void Flush() => throw new NotSupportedException();
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            public override int Read(byte[] buffer, int offset, int count)
             {
-                int count = base.Read(buffer, offset, bufferLength);
-                if (count == 0 && !endsAfterResponse)
+                if (_position == _current.Length && _next < responses.Length)
                 {
+                    // The following responses arrive one after the other
+                    thenEach[_next]?.Invoke();
+                    _current = Encoding.ASCII.GetBytes(responses[_next++]);
+                    _position = 0;
+                }
+
+                int length = Math.Min(count, _current.Length - _position);
+                Array.Copy(_current, _position, buffer, offset, length);
+                _position += length;
+                if (length == 0 && !endsAfterResponse)
+                {
+                    process.ReadCountAtEnd++;
                     atEnd?.Invoke();
                     process._killed.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue("the process must be killed");
                 }
 
-                return count;
+                return length;
             }
         }
     }

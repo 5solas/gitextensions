@@ -30,6 +30,9 @@ public sealed class FileViewerGitBrokerTests
 
         // Like the start of the application: the first git process must not be started by several threads at the same time
         _repository.Module.GitExecutable.GetOutput("--version");
+
+        // The persistent process is not used before the config has been read by the application
+        _repository.Module.GetEffectiveSetting("core.autocrlf");
     }
 
     [TearDown]

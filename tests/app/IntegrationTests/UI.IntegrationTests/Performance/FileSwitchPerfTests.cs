@@ -52,6 +52,9 @@ public sealed class FileSwitchPerfTests
         // Like the start of the application: the first git process must not be started by several threads at the same time
         module.GitExecutable.GetOutput("--version").Should().StartWith("git version");
         ObjectId commitId = module.GetCurrentCheckout();
+
+        // The persistent process is not used before the config has been read by the application
+        module.GetEffectiveSetting("core.autocrlf");
         string[] allFiles = [.. module.GetTree(commitId, full: true).Select(item => item.Name).Where(name => name.EndsWith(".cs"))];
         string[] files = [.. allFiles.Where((_, index) => index % (allFiles.Length / fileCount) == 0).Take(fileCount)];
 
