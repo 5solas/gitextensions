@@ -1,10 +1,12 @@
-﻿using System.Text;
+﻿using System.Reflection;
+using System.Text;
 using GitCommands;
 using GitCommands.Git.Broker;
 using GitCommands.Logging;
 using GitExtensions.Extensibility;
 using GitExtensions.Extensibility.Git;
 using GitUI;
+using Microsoft.VisualStudio.Threading;
 using NSubstitute;
 
 namespace GitCommandsTests.Git.Broker;
@@ -204,12 +206,34 @@ public sealed class GitBrokerTests
         ObjectId blobId = _scope.AddBlob("text"u8.ToArray());
 
         using MemoryStream first = GitBrokerTestScope.InBackground(() => _scope.Module.GetFileStreamAsync(blobId.ToString(), CancellationToken.None))!;
-        first.CanWrite.Should().BeFalse("the content in memory must not be changed");
-        first.ReadByte();
+        first.CanWrite.Should().BeTrue("plugins may change the stream");
+        first.GetBuffer()[0] = (byte)'x';
+        first.Write("changed and longer"u8);
         using MemoryStream second = GitBrokerTestScope.InBackground(() => _scope.Module.GetFileStreamAsync(blobId.ToString(), CancellationToken.None))!;
 
         second.Position.Should().Be(0);
         second.ToArray().Should().Equal("text"u8.ToArray());
+    }
+
+    [Test]
+    public void TryGetBlobStream_should_not_throw_without_JoinableTaskContext()
+    {
+        ObjectId blobId = _scope.AddBlob("text"u8.ToArray());
+        FieldInfo field = typeof(ThreadHelper).GetField("_taskManager", BindingFlags.Static | BindingFlags.NonPublic)!;
+        object? taskManager = field.GetValue(null);
+        JoinableTaskFactory factory = ThreadHelper.JoinableTaskFactory;
+        MemoryStream? stream;
+        field.SetValue(null, null);
+        try
+        {
+            stream = factory.Run(() => GitBroker.TryGetBlobStreamAsync(blobId.ToString(), _scope.Module.GitCommandRunner, CancellationToken.None));
+        }
+        finally
+        {
+            field.SetValue(null, taskManager);
+        }
+
+        stream.Should().BeNull("git has to be run");
     }
 
     [Test]

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using GitCommands.Git;
 using GitExtensions.Extensibility;
 using GitExtensions.Extensibility.Git;
@@ -22,12 +23,7 @@ internal static class GitConfigSnapshotProviderCache
             return new GitConfigSnapshotProvider(gitExecutable);
         }
 
-        string normalized;
-        try
-        {
-            normalized = Path.GetFullPath(workingDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        }
-        catch
+        if (!TryNormalize(workingDir, out string? normalized))
         {
             return new GitConfigSnapshotProvider(gitExecutable);
         }
@@ -62,6 +58,39 @@ internal static class GitConfigSnapshotProviderCache
             GitConfigSnapshotProvider newProvider = new(gitExecutable, normalized);
             _cache[normalized] = new WeakReference<GitConfigSnapshotProvider>(newProvider);
             return newProvider;
+        }
+    }
+
+    /// <summary>
+    ///  Gets the provider of a repository which is in use, without requesting a verification.
+    /// </summary>
+    public static GitConfigSnapshotProvider? TryGet(string workingDir)
+    {
+        if (!TryNormalize(workingDir, out string? normalized))
+        {
+            return null;
+        }
+
+        lock (_lock)
+        {
+            return _cache.TryGetValue(normalized, out WeakReference<GitConfigSnapshotProvider>? weakRef)
+                && weakRef.TryGetTarget(out GitConfigSnapshotProvider? provider)
+                ? provider
+                : null;
+        }
+    }
+
+    private static bool TryNormalize(string workingDir, [NotNullWhen(true)] out string? normalized)
+    {
+        try
+        {
+            normalized = Path.GetFullPath(workingDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return true;
+        }
+        catch
+        {
+            normalized = null;
+            return false;
         }
     }
 }

@@ -6,6 +6,7 @@
 internal static class GitBrokerStats
 {
     private static int _cacheHits;
+    private static int _evaluations;
     private static int _fallbacks;
     private static int _requests;
     private static int _runningProcesses;
@@ -15,6 +16,11 @@ internal static class GitBrokerStats
     ///  Gets the number of contents provided from memory.
     /// </summary>
     public static int CacheHits => Volatile.Read(ref _cacheHits);
+
+    /// <summary>
+    ///  Gets how often it has been determined whether a repository is supported.
+    /// </summary>
+    public static int Evaluations => Volatile.Read(ref _evaluations);
 
     /// <summary>
     ///  Gets the number of requests which could not be answered, so that the caller has to run git on its own.
@@ -37,6 +43,8 @@ internal static class GitBrokerStats
     public static int Starts => Volatile.Read(ref _starts);
 
     public static void CountCacheHit() => Interlocked.Increment(ref _cacheHits);
+
+    public static void CountEvaluation() => Interlocked.Increment(ref _evaluations);
 
     public static void CountExit() => Interlocked.Decrement(ref _runningProcesses);
 

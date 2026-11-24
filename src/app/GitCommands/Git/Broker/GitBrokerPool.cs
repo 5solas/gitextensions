@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using GitCommands.RepoSnapshot;
 using GitExtensions.Extensibility;
 using GitUI;
 
@@ -14,19 +16,26 @@ internal sealed class GitBrokerPool
     private const long DisabledMilliseconds = 5 * 60_000;
     private const int IdleToleranceMilliseconds = 50;
 
+    // Not before the failures are forgotten
+    private static readonly TimeSpan _defaultEntryTimeout = TimeSpan.FromMinutes(6);
     private static readonly TimeSpan _queueTimeout = TimeSpan.FromSeconds(5);
 
     // Lock ordering: the gate of an entry, then _lock. No callbacks are invoked while holding _lock.
     private readonly Lock _lock = new();
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private readonly TimeSpan _entryTimeout;
     private readonly TimeSpan _idleTimeout;
     private readonly int _maxSessions;
+    private readonly Func<Executable, string, CatFileSession> _startSession;
     private readonly Func<long> _getTickCount;
+    private int _releaseGeneration;
 
-    public GitBrokerPool(TimeSpan idleTimeout, int maxSessions, Func<long>? getTickCount = null)
+    public GitBrokerPool(TimeSpan idleTimeout, int maxSessions, Func<long>? getTickCount = null, TimeSpan? entryTimeout = null, Func<Executable, string, CatFileSession>? startSession = null)
     {
         _idleTimeout = idleTimeout;
+        _entryTimeout = entryTimeout ?? _defaultEntryTimeout;
         _maxSessions = maxSessions;
+        _startSession = startSession ?? CatFileSession.Start;
         _getTickCount = getTickCount ?? (() => Environment.TickCount64);
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
@@ -35,6 +44,17 @@ internal sealed class GitBrokerPool
                 session.KillNow();
             }
         };
+    }
+
+    internal int EntryCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _entries.Count;
+            }
+        }
     }
 
     internal int SessionCount
@@ -49,6 +69,20 @@ internal sealed class GitBrokerPool
     }
 
     /// <summary>
+    ///  Gets the key of a repository, the same one for all spellings of its working directory.
+    /// </summary>
+    public static bool TryGetKey(string? workingDir, [NotNullWhen(true)] out string? key)
+    {
+        if (!RepoSnapshotStore.TryGetKey(workingDir, out key))
+        {
+            return false;
+        }
+
+        key = key.ToUpperInvariant();
+        return true;
+    }
+
+    /// <summary>
     ///  Sends a request to the process of the repository in the working directory of <paramref name="gitExecutable"/>.
     ///  Blocks the thread until the response has been received, so nothing is done on the UI thread.
     /// </summary>
@@ -57,14 +91,21 @@ internal sealed class GitBrokerPool
     {
         result = default;
         cancellationToken.ThrowIfCancellationRequested();
-        if (!ThreadHelper.HasJoinableTaskContext || ThreadHelper.JoinableTaskContext.IsOnMainThread || string.IsNullOrWhiteSpace(gitExecutable.WorkingDir))
+        if (!ThreadHelper.HasJoinableTaskContext || ThreadHelper.JoinableTaskContext.IsOnMainThread || !TryGetKey(gitExecutable.WorkingDir, out string? key))
         {
             return false;
         }
 
-        Entry entry = GetEntry(gitExecutable.WorkingDir);
+        Entry entry = GetEntry(key);
         if (!entry.Gate.Wait(_queueTimeout, cancellationToken))
         {
+            return false;
+        }
+
+        if (entry.IsRemoved)
+        {
+            // While having waited, rare
+            entry.Gate.Release();
             return false;
         }
 
@@ -100,12 +141,8 @@ internal sealed class GitBrokerPool
         }
         finally
         {
-            if (session is not null)
-            {
-                entry.LastUsed = Environment.TickCount64;
-                entry.IdleTimer.Change(_idleTimeout, Timeout.InfiniteTimeSpan);
-            }
-
+            entry.LastUsed = Environment.TickCount64;
+            entry.IdleTimer.Change(_idleTimeout, Timeout.InfiniteTimeSpan);
             entry.Gate.Release();
         }
     }
@@ -121,14 +158,14 @@ internal sealed class GitBrokerPool
         }
     }
 
-    private Entry GetEntry(string workingDir)
+    private Entry GetEntry(string key)
     {
         lock (_lock)
         {
-            if (!_entries.TryGetValue(workingDir, out Entry? entry))
+            if (!_entries.TryGetValue(key, out Entry? entry))
             {
-                entry = new Entry(OnIdle);
-                _entries.Add(workingDir, entry);
+                entry = new Entry(key, OnIdle);
+                _entries.Add(key, entry);
             }
 
             return entry;
@@ -137,27 +174,38 @@ internal sealed class GitBrokerPool
 
     private CatFileSession? GetSession(Entry entry, Executable gitExecutable)
     {
+        int releaseGeneration = Volatile.Read(ref _releaseGeneration);
+        GitBrokerRepository? repository = GitBrokerRepository.TryGet(gitExecutable, entry.Repository);
+        bool isSupported = repository?.IsSupported is true;
         CatFileSession? session = entry.Session;
         if (session is not null)
         {
-            if (!session.IsStopped && entry.Repository?.IsCurrent(gitExecutable) is true)
+            if (isSupported && !session.IsStopped && repository!.HasSameProcess(entry.Repository))
             {
+                entry.Repository = repository;
                 return session;
             }
 
             Release(entry, session);
         }
 
-        entry.Repository = GitBrokerRepository.TryCreate(gitExecutable);
-        if (entry.Repository is null)
+        entry.Repository = repository;
+        if (!isSupported)
         {
             return null;
         }
 
-        session = CatFileSession.Start(gitExecutable, entry.Repository.GitDir);
+        session = _startSession(gitExecutable, repository!.GitDir);
         List<CatFileSession> excessSessions = [];
         lock (_lock)
         {
+            if (releaseGeneration != _releaseGeneration)
+            {
+                // All processes should have been ended meanwhile
+                session.Dispose();
+                return null;
+            }
+
             entry.LastUsed = Environment.TickCount64;
             entry.Session = session;
             foreach (Entry other in _entries.Values.Where(e => e.Session is not null && e != entry).OrderByDescending(e => e.LastUsed).Skip(_maxSessions - 1))
@@ -199,15 +247,42 @@ internal sealed class GitBrokerPool
 
         try
         {
-            if (entry.Session is CatFileSession session && Environment.TickCount64 - entry.LastUsed >= _idleTimeout.TotalMilliseconds - IdleToleranceMilliseconds)
+            if (entry.IsRemoved)
+            {
+                return;
+            }
+
+            TimeSpan idleTime = TimeSpan.FromMilliseconds(Environment.TickCount64 - entry.LastUsed + IdleToleranceMilliseconds);
+            if (idleTime >= _idleTimeout && entry.Session is CatFileSession session)
             {
                 Release(entry, session);
+            }
+
+            if (idleTime >= _entryTimeout)
+            {
+                Remove(entry);
+            }
+            else if (idleTime >= _idleTimeout)
+            {
+                entry.IdleTimer.Change(_entryTimeout - idleTime + TimeSpan.FromMilliseconds(IdleToleranceMilliseconds), Timeout.InfiniteTimeSpan);
             }
         }
         finally
         {
             entry.Gate.Release();
         }
+    }
+
+    /// <remarks>Must be called within the gate of the entry.</remarks>
+    private void Remove(Entry entry)
+    {
+        lock (_lock)
+        {
+            entry.IsRemoved = true;
+            _entries.Remove(entry.Key);
+        }
+
+        entry.IdleTimer.Dispose();
     }
 
     private bool Release(Entry entry, CatFileSession session)
@@ -230,6 +305,7 @@ internal sealed class GitBrokerPool
     {
         lock (_lock)
         {
+            _releaseGeneration++;
             List<CatFileSession> sessions = [];
             foreach (Entry entry in _entries.Values)
             {
@@ -246,10 +322,15 @@ internal sealed class GitBrokerPool
 
     private sealed class Entry
     {
-        public Entry(TimerCallback onIdle)
+        public Entry(string key, TimerCallback onIdle)
         {
+            Key = key;
             IdleTimer = new System.Threading.Timer(onIdle, this, Timeout.Infinite, Timeout.Infinite);
         }
+
+        public string Key { get; }
+
+        public bool IsRemoved { get; set; }
 
         public SemaphoreSlim Gate { get; } = new(1, 1);
 

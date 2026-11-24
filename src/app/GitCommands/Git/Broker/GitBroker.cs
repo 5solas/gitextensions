@@ -81,13 +81,25 @@ public static class GitBroker
             return null;
         }
 
+        if (!ThreadHelper.HasJoinableTaskContext)
+        {
+            return null;
+        }
+
         // Nothing but the memory is used on the UI thread
         byte[]? content = ThreadHelper.JoinableTaskContext.IsOnMainThread
             ? TryGetBlob(git, blobId, cancellationToken)
             : await Task.Run(() => TryGetBlob(git, blobId, cancellationToken), cancellationToken);
-        return content is null
-            ? null
-            : new MemoryStream(content, 0, content.Length, writable: false, publiclyVisible: true);
+        if (content is null)
+        {
+            return null;
+        }
+
+        // A copy: the caller may change the stream
+        MemoryStream stream = new(content.Length);
+        stream.Write(content);
+        stream.Position = 0;
+        return stream;
     }
 
     /// <summary>
@@ -108,7 +120,12 @@ public static class GitBroker
 
     private static byte[]? TryGetBlob(Executable git, ObjectId blobId, CancellationToken cancellationToken)
     {
-        if (Cache.TryGet(git.WorkingDir, blobId, out byte[]? content))
+        if (!GitBrokerPool.TryGetKey(git.WorkingDir, out string? key))
+        {
+            return null;
+        }
+
+        if (Cache.TryGet(key, blobId, out byte[]? content))
         {
             GitBrokerStats.CountCacheHit();
             return content;
@@ -120,7 +137,7 @@ public static class GitBroker
             return null;
         }
 
-        Cache.Add(git.WorkingDir, blobId, content);
+        Cache.Add(key, blobId, content);
         return content;
     }
 }
