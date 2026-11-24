@@ -1685,6 +1685,11 @@ public partial class FileViewer : GitModuleControl
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        if (TryUpdateTreeIdFromBroker(file, commitId, cancellationToken))
+        {
+            return file.TreeId;
+        }
+
         using IEnumerator<IObjectGitItem> enumerator = Module.GetTree(commitId, full: true, file.Name, cancellationToken).GetEnumerator();
         if (!enumerator.MoveNext())
         {
