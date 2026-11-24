@@ -12,8 +12,8 @@ namespace GitCommands.Git;
 public static partial class IndexRefreshGate
 {
     // The executable, options of git and the subcommand: the subcommand must not be found in other arguments.
-    [GeneratedRegex(@"^\s*(""[^""]*""|\S+)(\s+(-[cC]\s+(""[^""]*""|\S+)|--[a-z-]+(=(""[^""]*""|[^\s""])+)?))*\s+cat-file\s+--batch(-command|-check)?(=|\s|$)", RegexOptions.ExplicitCapture)]
-    private static partial Regex PersistentCatFileCommandLineRegex { get; }
+    [GeneratedRegex(@"^\s*(""[^""]*""|\S+)(\s+(-[cC]\s+(""[^""]*""|\S+)|--[a-z-]+(=(""[^""]*""|[^\s""])+)?))*\s+(cat-file\s+--batch(-command|-check)?(=|\s|$)|check-attr\s+--stdin(\s|$))", RegexOptions.ExplicitCapture)]
+    private static partial Regex PersistentReaderCommandLineRegex { get; }
 
     /// <summary>
     ///  Checks that neither the index of <paramref name="module"/> is locked nor another git command is running.
@@ -31,11 +31,11 @@ public static partial class IndexRefreshGate
 
     /// <summary>
     ///  Determines whether the command line is the one of a process which never locks the index and which remains
-    ///  although no command is running: the fsmonitor daemon and persistent readers of objects (like the ones of GE).
+    ///  although no command is running: the fsmonitor daemon and persistent readers of objects and attributes (like the ones of GE).
     /// </summary>
     internal static bool IsPersistentProcess(string? commandLine)
         => commandLine is not null
-            && (GitModule.IsGitFsMonitorDaemon(commandLine) || PersistentCatFileCommandLineRegex.IsMatch(commandLine));
+            && (GitModule.IsGitFsMonitorDaemon(commandLine) || PersistentReaderCommandLineRegex.IsMatch(commandLine));
 
     [SupportedOSPlatform("windows")]
     private static bool IsGitCommandRunning()

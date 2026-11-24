@@ -9,39 +9,16 @@ namespace GitCommands.Git.Broker;
 /// <summary>
 ///  A <c>git cat-file --batch-command</c> process of a repository.
 /// </summary>
-/// <remarks>
-///  Requests must not be sent concurrently.
-///  If anything but a complete and expected response has been read (timeout, error), the session is stopped,
-///  because the remaining part of the response would be taken for the next one.
-/// </remarks>
-internal sealed class CatFileSession : IDisposable
+internal sealed class CatFileSession : BrokerSession
 {
-    private const int MaxHeaderLength = 64 * 1024;
     private const long MaxContentLength = 256 * 1024 * 1024;
     private const long MaxCancelledContentLength = 1024 * 1024;
     private const long MinBytesPerSecond = 1024 * 1024;
 
-    // The start of the process can take long, e.g. because of a virus scanner
-    private static readonly TimeSpan _defaultFirstResponseTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan _responseTimeout = TimeSpan.FromSeconds(10);
-
-    // A response which is complete soon is read to its end after a cancellation, because another process start takes longer
-    private static readonly TimeSpan _cancelledResponseTimeout = TimeSpan.FromMilliseconds(250);
-    private static readonly UTF8Encoding _encoding = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
-
-    private readonly BrokerProcess _process;
-    private readonly byte[] _buffer = new byte[MaxHeaderLength];
-    private int _bufferStart;
-    private int _bufferEnd;
-    private TimeSpan _timeout;
-
     internal CatFileSession(IProcess process, TimeSpan? firstResponseTimeout = null)
+        : base(process, firstResponseTimeout)
     {
-        _process = new BrokerProcess(process);
-        _timeout = firstResponseTimeout ?? _defaultFirstResponseTimeout;
     }
-
-    public bool IsStopped => _process.IsStopped;
 
     /// <summary>
     ///  Starts the process.
@@ -51,24 +28,25 @@ internal sealed class CatFileSession : IDisposable
     ///  because it could not be moved or deleted while the process is running.
     ///  Missing objects are not fetched (which could run commands set in the config of the repository): the option sets
     ///  GIT_NO_LAZY_FETCH for this process. It ends at once if git does not know the option.
+    ///  The index is not read for the supported names, nevertheless the fsmonitor hook (run when it is read) is disabled.
     /// </remarks>
     public static CatFileSession Start(Executable gitExecutable, string gitDir) => new(StartProcess(gitExecutable, gitDir));
 
     internal static IProcess StartProcess(Executable gitExecutable, string gitDir)
     {
         Executable executable = new(gitExecutable.Command, Environment.SystemDirectory);
-        GitArgumentBuilder args = new("cat-file", gitOptions: (ArgumentString)$"--git-dir={gitDir.ToPosixPath().TrimEnd('/').Quote()} --no-lazy-fetch")
+        GitArgumentBuilder args = new("cat-file", gitOptions: (ArgumentString)$"--git-dir={gitDir.ToPosixPath().TrimEnd('/').Quote()} --no-lazy-fetch -c core.fsmonitor=false")
         {
             "--batch-command"
         };
 
-        return executable.Start(args, redirectInput: true, redirectOutput: true, outputEncoding: _encoding, throwOnErrorExit: false);
+        return executable.Start(args, redirectInput: true, redirectOutput: true, outputEncoding: RequestEncoding, throwOnErrorExit: false);
     }
 
     /// <summary>
     ///  Gets the header of an object.
     /// </summary>
-    /// <param name="objectName">Any name of an object as supported by git.</param>
+    /// <param name="objectName">Any name of an object as supported by git, except for names in the index.</param>
     /// <returns><see langword="null"/> if the object is missing or the name is not supported.</returns>
     /// <exception cref="GitBrokerException">The session is stopped.</exception>
     /// <exception cref="OperationCanceledException">Also stops the session if the response cannot be completed soon.</exception>
@@ -104,16 +82,16 @@ internal sealed class CatFileSession : IDisposable
 
             if (info.Size > MaxContentLength)
             {
-                _process.Stop(kill: true);
+                Kill();
                 return null;
             }
 
-            timeout.CancelAfter(_responseTimeout + TimeSpan.FromSeconds(info.Size / MinBytesPerSecond));
+            timeout.CancelAfter(ResponseTimeout + TimeSpan.FromSeconds(info.Size / MinBytesPerSecond));
 
             // If it is cancelled after this check, the time is limited by the cancellation
             if (cancellationToken.IsCancellationRequested)
             {
-                timeout.CancelAfter(_cancelledResponseTimeout);
+                timeout.CancelAfter(CancelledResponseTimeout);
                 if (info.Size > MaxCancelledContentLength)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -131,64 +109,23 @@ internal sealed class CatFileSession : IDisposable
         }
     }
 
-    /// <summary>
-    ///  Stops the process. Can be called on any thread.
-    /// </summary>
-    public void Dispose() => _process.Stop(kill: false);
-
-    public void KillNow() => _process.KillNow();
-
     private static bool TryGetRequest(string command, string objectName, out byte[] request)
     {
         request = [];
-        if (objectName.Length == 0 || objectName.Length > MaxHeaderLength / 8 || objectName.Any(char.IsControl))
+        if (objectName.Length == 0 || objectName.TrimStart().StartsWith(':') || objectName.Length > BufferLength / 8 || objectName.Any(char.IsControl))
         {
             return false;
         }
 
         try
         {
-            request = _encoding.GetBytes($"{command} {objectName}\n");
+            request = RequestEncoding.GetBytes($"{command} {objectName}\n");
             return true;
         }
         catch (EncoderFallbackException)
         {
             return false;
         }
-    }
-
-    private T Execute<T>(byte[] request, Func<CancellationTokenSource, T> readResponse, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (IsStopped)
-        {
-            throw new GitBrokerException("The process has been stopped");
-        }
-
-        using CancellationTokenSource timeout = new(_timeout);
-        _timeout = _responseTimeout;
-        using CancellationTokenRegistration cancellation = cancellationToken.Register(() => timeout.CancelAfter(_cancelledResponseTimeout));
-
-        // Unblocks the read and write operations
-        using CancellationTokenRegistration registration = timeout.Token.Register(() => _process.Stop(kill: true));
-        T result;
-        try
-        {
-            GitBrokerStats.CountRequest();
-            _process.Input.Write(request);
-            _process.Input.Flush();
-            result = readResponse(timeout);
-        }
-        catch (Exception ex)
-        {
-            _process.Stop(kill: true);
-            cancellationToken.ThrowIfCancellationRequested();
-            throw ex as GitBrokerException ?? new GitBrokerException("Request failed", ex);
-        }
-
-        // The response is complete: the session remains usable
-        cancellationToken.ThrowIfCancellationRequested();
-        return result;
     }
 
     private GitObjectInfo? ReadHeader(string objectName)
@@ -223,35 +160,12 @@ internal sealed class CatFileSession : IDisposable
         for (byte value = ReadByte(); value != '\n'; value = ReadByte())
         {
             line.WriteByte(value);
-            if (line.Length > MaxHeaderLength)
+            if (line.Length > BufferLength)
             {
                 throw new GitBrokerException("The header is too long");
             }
         }
 
-        return _encoding.GetString(line.GetBuffer(), 0, (int)line.Length);
-    }
-
-    private byte ReadByte()
-    {
-        if (_bufferStart == _bufferEnd)
-        {
-            _bufferStart = 0;
-            _bufferEnd = _process.Output.Read(_buffer, 0, _buffer.Length);
-            if (_bufferEnd == 0)
-            {
-                throw new GitBrokerException("The process has exited");
-            }
-        }
-
-        return _buffer[_bufferStart++];
-    }
-
-    private void ReadExactly(Span<byte> content)
-    {
-        int buffered = Math.Min(content.Length, _bufferEnd - _bufferStart);
-        _buffer.AsSpan(_bufferStart, buffered).CopyTo(content);
-        _bufferStart += buffered;
-        _process.Output.ReadExactly(content[buffered..]);
+        return RequestEncoding.GetString(line.GetBuffer(), 0, (int)line.Length);
     }
 }

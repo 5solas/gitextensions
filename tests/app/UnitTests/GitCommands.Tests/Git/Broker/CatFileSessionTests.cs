@@ -189,6 +189,82 @@ public sealed class CatFileSessionTests
     }
 
     [Test]
+    public void Index_should_not_be_read()
+    {
+        _scope.Commit("file", "text");
+        string marker = _scope.SetFsMonitorHook();
+        using (CatFileSession session = _scope.StartSession())
+        {
+            foreach (string name in (string[])[":file", ":0:file", " :file", ":/commit", ":missing"])
+            {
+                session.GetInfo(name, CancellationToken.None).Should().BeNull(name);
+            }
+
+            session.GetInfo("HEAD:file", CancellationToken.None).Should().NotBeNull();
+        }
+
+        GitBrokerTestScope.WaitUntil(() => GitBrokerStats.RunningProcesses == 0, "the process must end");
+
+        // Also if a name of the index is sent to the process
+        using (IProcess process = CatFileSession.StartProcess(_scope.GitExecutable, _scope.Module.WorkingDirGitDir))
+        {
+            process.StandardInput.Write("info :0:missing\n");
+            process.StandardInput.Close();
+            process.StandardOutput.ReadToEnd().Should().Contain("missing");
+        }
+
+        File.Exists(marker).Should().BeFalse("the hook must not be run");
+
+        // The check of the test: other git processes run it
+        _scope.Module.GitExecutable.Execute("cat-file -e :0:missing", throwOnErrorExit: false).ExitedSuccessfully.Should().BeFalse();
+        File.Exists(marker).Should().BeTrue();
+    }
+
+    [Test]
+    public void Cancelled_first_request_should_not_stop_a_session_which_is_started_slowly()
+    {
+        using CancellationTokenSource cancellation = new();
+        using BlockingProcess process = new(
+            thenEach: [CancelAndWait],
+            responses: [$"{Id1} blob 2\nab\n"]);
+        using CatFileSession session = new(process);
+
+        Action request = () => session.GetBlob(ObjectId.Parse(Id1), cancellation.Token);
+
+        request.Should().Throw<OperationCanceledException>();
+        session.IsStopped.Should().BeFalse();
+
+        void CancelAndWait()
+        {
+            cancellation.Cancel();
+            Thread.Sleep(700);
+        }
+    }
+
+    [Test]
+    public void Cancelled_second_request_should_stop_a_session_which_is_slow()
+    {
+        using CancellationTokenSource cancellation = new();
+        using BlockingProcess process = new(
+            response: $"{Id1} blob 2\nab\n",
+            thenEach: [CancelAndWait],
+            responses: [$"{Id1} blob 2\nab\n"]);
+        using CatFileSession session = new(process);
+        session.GetBlob(ObjectId.Parse(Id1), CancellationToken.None);
+
+        Action request = () => session.GetBlob(ObjectId.Parse(Id1), cancellation.Token);
+
+        request.Should().Throw<OperationCanceledException>();
+        session.IsStopped.Should().BeTrue();
+
+        void CancelAndWait()
+        {
+            cancellation.Cancel();
+            Thread.Sleep(700);
+        }
+    }
+
+    [Test]
     public void Command_line_should_be_known_as_a_persistent_process()
     {
         CommandLog.Clear();

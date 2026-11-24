@@ -12,6 +12,8 @@ public sealed class IndexRefreshGateTests
     [TestCase(@"git -c core.x=y -C ""C:\a b"" --no-optional-locks cat-file --batch", true)]
     [TestCase(@"git cat-file --batch-check=%(objectname)", true)]
     [TestCase(@"""C:\Program Files\Git\mingw64\libexec\git-core\git.exe"" fsmonitor--daemon run --detach --ipc-threads=8", true)]
+    [TestCase(@"git.exe --no-lazy-fetch -c core.fsmonitor=false check-attr --stdin -z diff text crlf eol", true)]
+    [TestCase(@"git check-attr -z diff -- --stdin", false)]
     [TestCase(@"git cat-file blob HEAD:file", false)]
     [TestCase(@"git status", false)]
     [TestCase(@"git commit -m "" cat-file --batch""", false)]

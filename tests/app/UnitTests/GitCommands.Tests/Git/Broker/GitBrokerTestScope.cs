@@ -20,6 +20,7 @@ internal sealed class GitBrokerTestScope : IDisposable
     // The stored values: null if the setting is not set, so the settings file does not get an entry
     private readonly string? _originalUseGitBroker = AppSettings.GetString(AppSettings.UseGitBroker.FullPath, defaultValue: null);
     private readonly string? _originalMemoryLimit = AppSettings.GetString(AppSettings.GitBrokerMemoryLimit.FullPath, defaultValue: null);
+    private readonly string? _originalUseForAttributes = AppSettings.GetString(AppSettings.UseGitBrokerForAttributes.FullPath, defaultValue: null);
     private readonly GitModuleTestHelper _helper = new("broker repo");
 
     public GitBrokerTestScope()
@@ -76,6 +77,19 @@ internal sealed class GitBrokerTestScope : IDisposable
         return marker;
     }
 
+    /// <summary>
+    ///  Sets a fsmonitor hook, which git runs if it reads the index.
+    /// </summary>
+    /// <returns>The file which is created by the hook.</returns>
+    public string SetFsMonitorHook()
+    {
+        string marker = Path.Combine(_helper.TemporaryPath, "fsmonitor.txt");
+        string hook = Path.Combine(_helper.TemporaryPath, "hook.sh");
+        File.WriteAllText(hook, $"#!/bin/sh\necho run > '{marker.ToPosixPath()}'\n");
+        Git($"config core.fsmonitor {hook.ToPosixPath().Quote()}");
+        return marker;
+    }
+
     public string Git(string arguments) => Module.GitExecutable.GetOutput(arguments).Trim();
 
     public ObjectId AddBlob(byte[] content)
@@ -110,6 +124,7 @@ internal sealed class GitBrokerTestScope : IDisposable
     {
         AppSettings.SetString(AppSettings.UseGitBroker.FullPath, _originalUseGitBroker!);
         AppSettings.SetString(AppSettings.GitBrokerMemoryLimit.FullPath, _originalMemoryLimit!);
+        AppSettings.SetString(AppSettings.UseGitBrokerForAttributes.FullPath, _originalUseForAttributes!);
         GitBroker.ReleaseAll();
         GitBroker.Cache.Clear();
         WaitUntil(() => GitBrokerStats.RunningProcesses == 0, "no process may use the repository");

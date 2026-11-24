@@ -378,8 +378,12 @@ public sealed class ConfigSnapshotReuseTests
 
     private void ChangeConfig(string value) => File.WriteAllText(ConfigFile, File.ReadAllText(ConfigFile).Replace("initial", value));
 
-    private static int CountConfigLists()
-        => CommandLog.Commands.Count(c => c.Arguments.Contains("config list") || c.Arguments.Contains("config --list"));
+    /// <remarks>
+    ///  The config of the module of the helper is read in the background some time after it has been set up.
+    /// </remarks>
+    private int CountConfigLists()
+        => CommandLog.Commands.Count(c => (c.Arguments.Contains("config list") || c.Arguments.Contains("config --list"))
+            && Path.TrimEndingDirectorySeparator(c.WorkingDir).Equals(_workingDir, StringComparison.OrdinalIgnoreCase));
 
     private string CreateIncludedFile(string value, TimeSpan age)
     {

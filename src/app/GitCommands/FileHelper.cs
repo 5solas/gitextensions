@@ -83,6 +83,7 @@ public static partial class FileHelper
             "--",
             fileName.Quote()
         };
+        module = Git.Broker.GitBroker.WithAttributes(module, fileName);
         ExecutionResult result = module.GitExecutable.Execute(cmd, throwOnErrorExit: false);
         if (!result.ExitedSuccessfully)
         {
