@@ -22,7 +22,7 @@ public partial class FormBrowseGitProcessBudgetTests
     // Only ever lower these numbers, see the budgets for opening a repository.
     // Before the config and the stashes were reused: 6 (UI 0) / 7 (UI 1), and one more on the UI thread after a garbage collection.
     private const int MaxUiThreadGitProcessesForSwitchBack = 0;
-    private const int MaxGitProcessesForSwitchBack = 6;
+    private const int MaxGitProcessesForSwitchBack = 4;
 
     [Test]
     public void Switch_back_to_repository_without_stash_should_stay_within_git_process_budget([Values] bool collectGarbage)

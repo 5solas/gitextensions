@@ -348,6 +348,7 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
             Brush? lastBrush = null;
 
             gitStatusMonitor = new GitStatusMonitor(this, () => IsMinimized());
+            notificationBarGitActionInProgress.SetStatusUpdateSource(gitStatusMonitor.GetUpdateState);
             if (!NeedsGitStatusMonitor())
             {
                 gitStatusMonitor.Active = false;

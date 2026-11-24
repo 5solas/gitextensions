@@ -35,6 +35,7 @@ BooleanSetting MergeGraphLanesHavingCommonParent = Appearance.RevisionGraph.Merg
 BooleanSetting MessageEditorWordWrap = Detailed.MessageEditorWordWrap
 IntegerSetting OutputHistoryDepth = Detailed.OutputHistoryDepth
 BooleanSetting OutputHistoryPanelVisible = Detailed.OutputHistoryPanelVisible
+BooleanSetting RefreshIndexAfterSlowStatus = RefreshIndexAfterSlowStatus
 BooleanSetting RememberDiffDisplayAppearance = Appearance.RememberDiffDisplayAppearance
 BooleanSetting RenderGraphWithDiagonals = Appearance.RevisionGraph.RenderGraphWithDiagonals
 IntegerSetting RepoSnapshotMemoryLimit = RepoSnapshotMemoryLimit
