@@ -1,0 +1,238 @@
+name: hj-upstream-autosync
+
+# When upstream/master moved and the patch stack rebases, builds and tests cleanly: push master,
+# the topic branches, the rebuilt hj/main and a new hj/v* tag in ONE atomic leased push, then build
+# the release. Otherwise report in the single 'upstream-sync' issue and push nothing.
+# Design and failure modes: docs/hj/UPSTREAM-AUTOSYNC.md
+
+on:
+  schedule:
+    # Daily 03:17 UTC (off the hour to avoid runner load spikes). Runs from the default branch (hj/main).
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run every step but push/tag/release and print the push plan (issues untouched)'
+        required: false
+        type: boolean
+        default: true
+      ignore_daily_limit:
+        description: 'Allow a second release on the same UTC day (only with dry_run=false)'
+        required: false
+        type: boolean
+        default: false
+      base_ref:
+        description: 'dry_run only: simulate an older mirror, e.g. upstream/master~5'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  # Shared with hj-upstream-watch so the two never edit the same issue at once.
+  group: hj-upstream-sync
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  OUT_DIR: artifacts/hj-autosync
+
+jobs:
+  sync:
+    name: Rebase, verify, push
+    if: github.repository_owner == '5solas'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      issues: write
+    outputs:
+      status: ${{ steps.result.outputs.status }}
+      pushed: ${{ steps.result.outputs.pushed }}
+      tag: ${{ steps.result.outputs.tag }}
+      mode: ${{ steps.mode.outputs.mode }}
+      release-mode: ${{ steps.mode.outputs.release-mode }}
+
+    steps:
+      - name: Resolve mode
+        id: mode
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          AUTO_RELEASE: ${{ vars.HJ_AUTO_RELEASE }}
+          HAS_SYNC_TOKEN: ${{ secrets.HJ_SYNC_TOKEN != '' }}
+        run: |
+          # dry-run     : manual run with dry_run=true (default) - nothing pushed, issues untouched.
+          # report-only : HJ_AUTO_RELEASE=false - verify and report in the issue, push nothing.
+          # release     : push + tag + release when everything passes.
+          $mode = 'release'
+          if ($env:EVENT_NAME -eq 'workflow_dispatch' -and $env:INPUT_DRY_RUN -ne 'false') {
+            $mode = 'dry-run'
+          } elseif ($env:AUTO_RELEASE -eq 'false') {
+            $mode = 'report-only'
+          }
+          # A tag pushed with GITHUB_TOKEN does not trigger hj-release's 'on: push', so the release is
+          # built here via workflow_call. A tag pushed with the optional HJ_SYNC_TOKEN does trigger it.
+          $releaseMode = if ($env:HAS_SYNC_TOKEN -eq 'true') { 'tag-push' } else { 'workflow-call' }
+          "mode=$mode" >> $env:GITHUB_OUTPUT
+          "release-mode=$releaseMode" >> $env:GITHUB_OUTPUT
+          Write-Host "mode=$mode release-mode=$releaseMode"
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          # The persisted credential is what 'git push' uses later.
+          token: ${{ secrets.HJ_SYNC_TOKEN || github.token }}
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Configure git
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          $upstreamUrl = 'https://github.com/gitextensions/gitextensions.git'
+          if (git remote | Select-String -Pattern '^upstream$' -Quiet) {
+            git remote set-url upstream $upstreamUrl
+          } else {
+            git remote add upstream $upstreamUrl
+          }
+          git --version
+
+      - name: Sync (rebase, bump, build, test, push)
+        id: autosync
+        shell: pwsh
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
+          IGNORE_DAILY_LIMIT: ${{ inputs.ignore_daily_limit }}
+          BASE_REF: ${{ inputs.base_ref }}
+        run: |
+          $syncArgs = @('-OutDir', $env:OUT_DIR)
+          if ($env:MODE -ne 'release') {
+            $syncArgs += '-DryRun'
+            if ($env:MODE -eq 'dry-run' -and $env:BASE_REF) {
+              $syncArgs += @('-BaseRef', $env:BASE_REF)
+            } else {
+              # Checks credentials, --atomic support and the leases without sending anything.
+              $syncArgs += '-ProbePush'
+            }
+          }
+          if ($env:IGNORE_DAILY_LIMIT -eq 'true') { $syncArgs += '-IgnoreDailyLimit' }
+          & pwsh -NoProfile -File eng/hj/Invoke-AutoSync.ps1 @syncArgs
+          exit $LASTEXITCODE
+
+      - name: Read result
+        id: result
+        if: always()
+        shell: pwsh
+        run: |
+          $path = Join-Path $env:OUT_DIR 'result.json'
+          $r = if (Test-Path $path) { Get-Content -Raw $path | ConvertFrom-Json } else { $null }
+          $status = if ($r) { $r.status } else { 'error' }
+          $pushed = if ($r -and $r.pushed) { 'true' } else { 'false' }
+          $tag = if ($r) { $r.tag } else { '' }
+          "status=$status" >> $env:GITHUB_OUTPUT
+          "pushed=$pushed" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          $report = Join-Path $env:OUT_DIR 'report.md'
+          if (Test-Path $report) {
+            Get-Content -Raw $report >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            "autosync produced no report (status: $status)" >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Update upstream-sync issue
+        if: always() && steps.mode.outputs.mode != 'dry-run'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          & pwsh -NoProfile -File eng/hj/Update-SyncIssue.ps1 -Phase sync -Mode $env:MODE `
+            -ResultPath (Join-Path $env:OUT_DIR 'result.json') -ReportPath (Join-Path $env:OUT_DIR 'report.md')
+          exit $LASTEXITCODE
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hj-autosync-report
+          path: |
+            artifacts/hj-autosync/*.md
+            artifacts/hj-autosync/*.json
+            artifacts/hj-autosync/trx/**/*.trx
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload logs on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hj-autosync-logs
+          path: |
+            artifacts/hj-autosync/*.binlog
+            artifacts/hj-autosync/trx/**/Sequence_*.xml
+            artifacts/hj-autosync/trx/**/*.dmp
+          retention-days: 7
+          if-no-files-found: ignore
+
+  release:
+    name: Release build
+    needs: sync
+    # always(): once the push happened, a later failing step in 'sync' must not skip the release.
+    if: always() && needs.sync.outputs.pushed == 'true' && needs.sync.outputs.release-mode == 'workflow-call'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/hj-release.yml
+    with:
+      tag: ${{ needs.sync.outputs.tag }}
+
+  finalize:
+    name: Report release
+    needs: [sync, release]
+    if: always() && needs.sync.outputs.pushed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: eng/hj
+
+      - name: Download report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: hj-autosync-report
+          path: artifacts/hj-autosync
+
+      - name: Close or update upstream-sync issue
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          RELEASE_MODE: ${{ needs.sync.outputs.release-mode }}
+        run: |
+          & pwsh -NoProfile -File eng/hj/Update-SyncIssue.ps1 -Phase finalize `
+            -ResultPath (Join-Path $env:OUT_DIR 'result.json') -ReportPath (Join-Path $env:OUT_DIR 'report.md') `
+            -ReleaseResult $env:RELEASE_RESULT -ReleaseMode $env:RELEASE_MODE
+          exit $LASTEXITCODE
