@@ -1,0 +1,24 @@
+﻿Index,StartOffsetMs,DurationMs,IsOnMainThread,ExitCode,CommandLine,CallStack
+1,1342.7,103.4,False,0,"git for-each-ref --format=""%(push:track,nobracket)::%(upstream:track,nobracket)::%(push)::%(upstream)::%(refname:short)"" refs/heads/",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+2,1342.7,94.9,True,0,git remote,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+3,1438.0,75.1,True,0,git config list --includes --null,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+4,1513.6,116.8,True,0,git config list --local --includes --null,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+5,1636.6,84.3,True,0,git ls-files -z --unmerged,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+6,1723.4,76.9,True,0,git rev-parse --git-common-dir,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+7,1801.7,111.4,False,0,"git --no-optional-locks for-each-ref --format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+8,1805.3,93.2,True,0,"git stash list -z --pretty=format:""%H%T%P%n%at%n%ct%n%aN%n%aE%n%cN%n%cE%n%gD%n%B""",ProcessWrapper..ctor -> Executable.Start -> GitCommandRunner.RunDetached
+9,1899.3,1085.5,False,0,"git -c log.showsignature=false log -z --pretty=format:""%H%T%P%n%at%n%ct%n%aN%n%aE%n%cN%n%cE%n%B"" --max-count=100000 --exclude=refs/notes/commits --exclude=refs/agents/** --exclude=refs/sessions/** --e",ProcessWrapper..ctor -> Executable.Start -> GitCommandRunner.RunDetached
+10,1899.4,82.5,False,0,git remote -v,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+11,1899.4,87.6,False,0,git worktree list --porcelain -z,ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+12,1900.4,91.9,True,0,git remote,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+13,1995.2,80.9,True,0,git ls-files -z --unmerged,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+14,2231.4,1276.7,False,,git --no-optional-locks -c diff.ignoresubmodules=none status --porcelain=2 -z --untracked-files,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+15,2645.3,120.5,False,0,"git for-each-ref --sort=""-taggerdate"" --format=""%(refname)"" refs/tags/",ProcessWrapper..ctor -> Executable.Start -> <GetOutputAsync>d__5.MoveNext
+16,2645.3,99.2,False,0,git branch --contains b9e5cff1803ab24582201ef059516eb16014b9d9,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+17,2645.7,537.0,False,0,"git branch --format=""%(refname)"" -a --merged ""b9e5cff1803ab24582201ef059516eb16014b9d9""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+18,2745.0,509.4,False,0,git tag --contains b9e5cff1803ab24582201ef059516eb16014b9d9,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+19,3194.1,84.6,False,0,git remote,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+20,3254.9,91.2,False,0,git describe --tags --first-parent --abbrev=40 b9e5cff1803ab24582201ef059516eb16014b9d9,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+21,3294.4,153.6,False,,"git branch --format=""%(refname)"" -a --merged ""b9e5cff1803ab24582201ef059516eb16014b9d9""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+22,3294.5,88.0,False,0,git -c color.ui=never -c diff.submodule=short -c diff.noprefix=false -c diff.mnemonicprefix=false -c diff.ignoresubmodules=none -c core.safecrlf=false diff --no-ext-diff --find-renames --find-copies -,ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
+23,3448.1,80.2,False,,"git branch --format=""%(refname)"" -a --merged ""b9e5cff1803ab24582201ef059516eb16014b9d9""",ProcessWrapper..ctor -> Executable.Start -> <ExecuteAsync>d__10.MoveNext
