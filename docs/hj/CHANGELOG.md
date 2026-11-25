@@ -7,6 +7,30 @@ git 프로세스 수는 예산 테스트(`FormBrowseGitProcessBudgetTests`)의 �
 
 ---
 
+## 7.3.0-hj-10 (2026-11-26)
+
+upstream 4개 커밋을 반영했다(`063b76ce3` 까지). 포크 쪽 기능 변경은 없다.
+
+### 반영한 upstream 커밋
+
+- `f00065009` feat(DeleteUnusedBranches): offer agent session refs for deletion (#13420)
+- `b1fba546b` fix(blame): save and restore the blame splitter position (#13480)
+- `6b4f8bd55` feat(FileViewer): make the max diff file size configurable (#13481)
+- `063b76ce3` fix(submodules): show sha instead of an exception
+
+### 충돌과 해결
+
+- 자동 반영(`hj-upstream-autosync`)이 `feature/perf-repo-open` 리베이스에서 멈췄다. 충돌 파일은 `tests/app/UnitTests/GitUI.Tests/Editor/FileViewerTests.cs` 하나다.
+- 원인: upstream `6b4f8bd55` 가 그 테스트 파일 끝에 테스트 4개를 추가했고, 포크 커밋(파일 diff 표시 중 git 을 UI 스레드에서 실행하지 않음)도 같은 자리에 테스트 1개를 추가했다.
+- 해결: 양쪽 테스트를 모두 남겼다(using 은 포크 쪽 목록이 upstream 것을 포함). 제품 코드의 충돌은 없었다.
+- 나머지 토픽(`feature/ghostty-console`, `feature/build-tools-support`, `hj/infra`)은 충돌 없이 리베이스됐다. 리베이스 전후 커밋 비교(`git range-diff`)에서 달라진 것은 위 커밋 하나뿐이다.
+
+### 포크 패치와 유사한 upstream 변경
+
+- 자동 대조(키워드·경로) 결과 없음.
+
+---
+
 ## 7.3.0-hj-9 (2026-11-26)
 
 upstream 기준은 hj-8 과 같다(`bd69886b7`). hj-8 에서 "다음 릴리스 예정"으로 남긴 항목이 들어갔다.
