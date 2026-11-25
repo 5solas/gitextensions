@@ -144,6 +144,48 @@ internal sealed class AttributeFiles
         return isInstallation ? paths : null;
     }
 
+    /// <summary>
+    ///  Gets all files which could contain the attributes of the user. Which one is read depends also on their existence.
+    /// </summary>
+    /// <returns>
+    ///  <see langword="null"/> if they are not known. A folder in the format of MSYS ("/c/Users/x") is not converted by git,
+    ///  like other relative ones it depends on the current drive of git.
+    /// </returns>
+    internal static IReadOnlyList<string>? GetDefaultGlobalFiles(Func<string, string?> getVariable)
+    {
+        List<string> folders = [];
+        Add(getVariable("XDG_CONFIG_HOME"), "git");
+        Add(getVariable("APPDATA"), "Git");
+
+        string? home = getVariable("HOME");
+        if (!string.IsNullOrEmpty(home))
+        {
+            Add(home, ".config", "git");
+        }
+        else
+        {
+            // Git uses the second one if the first one does not exist
+            if (!string.IsNullOrEmpty(getVariable("HOMEDRIVE")))
+            {
+                Add($"{getVariable("HOMEDRIVE")}{getVariable("HOMEPATH")}", ".config", "git");
+            }
+
+            Add(getVariable("USERPROFILE"), ".config", "git");
+        }
+
+        return folders.Count > 0 && folders.All(Path.IsPathFullyQualified)
+            ? [.. folders.Select(folder => Path.GetFullPath(Path.Combine(folder, "attributes")))]
+            : null;
+
+        void Add(string? folder, params string[] subFolders)
+        {
+            if (!string.IsNullOrEmpty(folder))
+            {
+                folders.Add(Path.Combine([folder, .. subFolders]));
+            }
+        }
+    }
+
     internal static AttributeFiles CreateForTest(string workingDir) => new(workingDir);
 
     private static bool IsFileException(Exception ex)
@@ -154,8 +196,7 @@ internal sealed class AttributeFiles
 
     private static bool TryGetGlobalFiles(GitBrokerRepository repository, string workingDir, out List<string> paths)
     {
-        List<string> globalFiles = [];
-        paths = globalFiles;
+        paths = [];
         if (repository.GetConfigValue("attr.tree") is not null
             || repository.GetConfigValue("core.bare")?.ToLowerInvariant() is not (null or "false" or "no" or "off" or "0" or ""))
         {
@@ -181,21 +222,15 @@ internal sealed class AttributeFiles
             return true;
         }
 
-        // Which one is used depends on their existence
-        AddDefault("XDG_CONFIG_HOME", "git");
-        AddDefault("HOME", ".config", "git");
-        AddDefault("APPDATA", "Git");
-        return paths.Count > 0;
-
-        void AddDefault(string variable, params string[] folders)
+        // The variables as set for the process, see Executable.Start()
+        EnvironmentConfiguration.SetEnvironmentVariables();
+        if (GetDefaultGlobalFiles(Environment.GetEnvironmentVariable) is not IReadOnlyList<string> defaultFiles)
         {
-            string? folder = Environment.GetEnvironmentVariable(variable);
-            if (!string.IsNullOrEmpty(folder))
-            {
-                // Relative to the current directory of git
-                globalFiles.Add(Path.GetFullPath(Path.Combine([workingDir, folder, .. folders, "attributes"])));
-            }
+            return false;
         }
+
+        paths.AddRange(defaultFiles);
+        return true;
     }
 
     private IEnumerable<string> GetFilesOfFolders(string path)

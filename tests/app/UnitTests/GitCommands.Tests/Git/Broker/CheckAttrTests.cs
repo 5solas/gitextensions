@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.IO.Pipes;
 using System.Text;
 using CommonTestUtils;
 using GitCommands;
@@ -189,6 +190,137 @@ public sealed class CheckAttrTests
         WriteAged(file, "*.txt text=new\n", TimeSpan.FromMinutes(30));
         Read("sub/a.txt").Should().Contain("text\0new");
         CountStarts().Should().Be(3);
+    }
+
+    [TestCase("HOME", "", ".config/git")]
+    [TestCase("USERPROFILE", "", ".config/git")]
+    [TestCase("HOMEDRIVE", "HOMEPATH", ".config/git")]
+    [TestCase("XDG_CONFIG_HOME", "", "git")]
+    [TestCase("APPDATA", "", "Git")]
+    public void Default_global_attributes_should_be_the_ones_read_by_git(string variable, string secondVariable, string subFolder)
+    {
+        string home = Path.GetFullPath(Path.Combine(WorkingDir, "..", "home"));
+        string file = Path.GetFullPath(Path.Combine(home, subFolder, "attributes"));
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "*.txt text=found\n");
+        Dictionary<string, string?> variables = new()
+        {
+            ["HOME"] = null,
+            ["HOMEDRIVE"] = null,
+            ["HOMEPATH"] = null,
+            ["USERPROFILE"] = null,
+            ["XDG_CONFIG_HOME"] = null,
+            ["APPDATA"] = null,
+        };
+        variables[variable] = secondVariable.Length == 0 ? home : home[..2];
+        if (secondVariable.Length > 0)
+        {
+            variables[secondVariable] = home[2..];
+        }
+
+        // The check of the test: git itself, without any other global file
+        ProcessStartInfo startInfo = new(AppSettings.GitCommand, "check-attr text -- a.txt")
+        {
+            WorkingDirectory = WorkingDir,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+        };
+        startInfo.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(WorkingDir, "missing");
+        foreach ((string name, string? value) in variables)
+        {
+            startInfo.Environment.Remove(name);
+            if (value is not null)
+            {
+                startInfo.Environment[name] = value;
+            }
+        }
+
+        using Process process = Process.Start(startInfo)!;
+        process.StandardOutput.ReadToEnd().Should().Contain("text: found");
+        process.WaitForExit();
+
+        AttributeFiles.GetDefaultGlobalFiles(variables.GetValueOrDefault).Should().Contain(file);
+    }
+
+    [TestCase("/c/Users/x")]
+    [TestCase(@"\Users\x")]
+    [TestCase("relative")]
+    [TestCase("C:relative")]
+    public void Default_global_attributes_should_be_unknown_if_the_folder_depends_on_the_current_one(string folder)
+    {
+        foreach (string variable in (string[])["HOME", "XDG_CONFIG_HOME", "APPDATA"])
+        {
+            AttributeFiles.GetDefaultGlobalFiles(name => name == variable ? folder : name == "HOME" ? @"C:\home" : null).Should().BeNull(variable);
+        }
+
+        AttributeFiles.GetDefaultGlobalFiles(name => name == "USERPROFILE" ? folder : null).Should().BeNull();
+        AttributeFiles.GetDefaultGlobalFiles(_ => null).Should().BeNull();
+    }
+
+    [Test]
+    public void Home_folder_in_the_format_of_MSYS_should_be_left_to_git()
+    {
+        Read("a.txt");
+        CountStarts().Should().Be(1);
+        string? originalHomeDir = AppSettings.GetString("customhomedir", defaultValue: null);
+        string globalConfig = Path.GetFullPath(Path.Combine(WorkingDir, "..", "global.cfg"));
+        File.WriteAllText(globalConfig, "");
+        File.SetLastWriteTimeUtc(globalConfig, DateTime.UtcNow.AddHours(-1));
+        SetVariable("HOME", Environment.GetEnvironmentVariable("HOME"));
+        SetVariable("GIT_CONFIG_GLOBAL", globalConfig);
+        SetVariable("XDG_CONFIG_HOME", null);
+        try
+        {
+            AppSettings.CustomHomeDir = "/c/not existing/home";
+            _scope.ReadConfig();
+            CommandLog.Clear();
+
+            GitBrokerTestScope.InBackground(() => GitBroker.WithAttributes(_scope.Module, "a.txt")).Should().BeSameAs(_scope.Module);
+            CountStarts().Should().Be(0);
+        }
+        finally
+        {
+            AppSettings.SetString("customhomedir", originalHomeDir!);
+        }
+    }
+
+    [Test]
+    public void First_response_should_not_be_waited_for_as_long_as_for_a_file()
+    {
+        CheckAttrSession.FirstResponseTimeout.Should().BeLessThanOrEqualTo(TimeSpan.FromSeconds(5));
+        using AnonymousPipeServerStream server = new(PipeDirection.Out);
+        using AnonymousPipeClientStream client = new(PipeDirection.In, server.ClientSafePipeHandle);
+        IProcess process = Substitute.For<IProcess>();
+        process.StandardInput.Returns(new StreamWriter(new MemoryStream()));
+        process.StandardOutput.Returns(new StreamReader(client));
+        TaskCompletionSource<int> exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.WaitForExitAsync().Returns(exit.Task);
+        process.When(p => p.Kill(true)).Do(_ =>
+        {
+            server.Dispose();
+            exit.TrySetResult(-1);
+        });
+        using CheckAttrSession session = new(process, AttributeFiles.CreateForTest(WorkingDir), firstResponseTimeout: TimeSpan.FromMilliseconds(200));
+        Action request = () => session.Query("a", CancellationToken.None);
+
+        request.Should().Throw<GitBrokerException>();
+
+        session.IsStopped.Should().BeTrue();
+    }
+
+    [Test]
+    public void Module_with_known_attributes_should_throw_the_original_exception()
+    {
+        IGitModule module = Substitute.For<IGitModule>();
+        InvalidOperationException exception = new("original");
+        module.When(m => m.GetCurrentCheckout()).Do(_ => throw exception);
+        IGitModule known = KnownAttributesModule.Create(module, []);
+
+        Action call = () => known.GetCurrentCheckout();
+
+        call.Should().Throw<InvalidOperationException>().Which.Should().BeSameAs(exception);
+        exception.StackTrace.Should().Contain(nameof(Module_with_known_attributes_should_throw_the_original_exception));
     }
 
     [Test]
@@ -510,7 +642,7 @@ public sealed class CheckAttrTests
         return module.GitExecutable.Execute(args, throwOnErrorExit: false).StandardOutput;
     }
 
-    private void SetVariable(string name, string value)
+    private void SetVariable(string name, string? value)
     {
         _originalVariables.TryAdd(name, Environment.GetEnvironmentVariable(name));
         Environment.SetEnvironmentVariable(name, value);
