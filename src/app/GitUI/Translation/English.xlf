@@ -8139,6 +8139,42 @@ Context menu for additional operations</source>
         <source>Advanced</source>
         <target />
       </trans-unit>
+      <trans-unit id="_fsMonitorBare.Text">
+        <source>bare repository.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorLarge.Text">
+        <source>large repository on a local drive (index {0:N1} MB).</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorNetworkDrive.Text">
+        <source>network drive or WSL.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorNotFixedDrive.Text">
+        <source>not a fixed drive.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorNotRecommended.Text">
+        <source>Not recommended: {0}</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorNotSupported.Text">
+        <source>Not supported: {0}</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorRecommended.Text">
+        <source>Recommended: {0}</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorSmall.Text">
+        <source>small repository (index {0:N1} MB), the daemon would need about 9 MB of memory for little effect.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorSubmodules.Text">
+        <source>many submodules, the daemon also has to handle their changes.</source>
+        <target />
+      </trans-unit>
       <trans-unit id="lblCoreFsMonitor.Text">
         <source>Run a file system monitor daemon per working directory</source>
         <target />
@@ -8857,6 +8893,90 @@ This will just checkout on the submodule the commit determined by the superproje
       </trans-unit>
       <trans-unit id="subjectDataGridViewTextBoxColumn.HeaderText">
         <source>Subject</source>
+        <target />
+      </trans-unit>
+    </body>
+  </file>
+  <file datatype="plaintext" original="PerformanceSettingsPage" source-language="en">
+    <body>
+      <trans-unit id="$this.Text">
+        <source>Performance</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_chkRefreshIndexAfterSlowStatus.Text">
+        <source>Allow the status update to refresh the index if it was slow</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_chkStopIdleFsMonitorDaemons.Text">
+        <source>Stop the daemons of repositories which have not been used recently</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_chkUseDirectGitBinary.Text">
+        <source>Start the git binary directly instead of its launcher</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_chkUseGitBroker.Text">
+        <source>Read file contents with a persistent git process</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_chkUseGitBrokerForAttributes.Text">
+        <source>Read git attributes with a persistent git process, too</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_gbFsMonitor.Text">
+        <source>File system monitor</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_gbGitProcesses.Text">
+        <source>Git processes</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_gbMemory.Text">
+        <source>Memory</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_gbStatus.Text">
+        <source>Status</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblGitBrokerMemoryLimit.Text">
+        <source>Limit for file contents read by the persistent git process (MB, 0 = off)</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblGitBrokerMemoryLimitHint.Text">
+        <source>Files which are viewed again need not be read again. A lower limit takes effect when a file is viewed the next time.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblMaxFsMonitorDaemons.Text">
+        <source>Number of daemons to keep</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblRefreshIndexAfterSlowStatusHint.Text">
+        <source>Saves git from comparing the contents of touched files with each status update. Done at most every 5 minutes and only if no other git command is running. A git command which is started at the same moment in another window can fail because of index.lock. Disable this if that happens.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblRepoSnapshotMemoryLimit.Text">
+        <source>Limit for the config and the stashes of recent repositories (MB, 0 = off)</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblRepoSnapshotMemoryLimitHint.Text">
+        <source>Saves git processes when switching back to a repository. The data is used only if it is still up to date. Set this to 0 in order to read it again each time.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblStopIdleFsMonitorDaemonsHint.Text">
+        <source>Saves about 9 MB of memory per daemon. Only for repositories opened in this session. If another program uses the repository, its next git command starts the daemon again and takes longer once. Disable this if that is a problem.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblUseDirectGitBinaryHint.Text">
+        <source>Saves one or two processes per git command. Disable this if git behaves differently than on the command line, e.g. if hooks do not find their tools.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblUseGitBrokerForAttributesHint.Text">
+        <source>Saves a git process per viewed file. The process is ended if it is not used for 3 seconds. The folder of the repository cannot be moved or deleted while it is running.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_lblUseGitBrokerHint.Text">
+        <source>Saves git processes when viewing files. The process is ended if it is not used for 15 seconds. Disable this if it hinders other programs from changing the repository.</source>
         <target />
       </trans-unit>
     </body>

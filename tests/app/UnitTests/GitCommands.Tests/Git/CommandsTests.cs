@@ -306,6 +306,13 @@ public partial class CommandsTests
         Commands.GetRefs(getRefs, noLocks, sortBy, sortOrder, count).ToString().Should().Be(expected);
     }
 
+    [TestCase(RefsFilter.NoFilter, @"--no-optional-locks for-each-ref --format=""%(if)%(authordate)%(then)%(objectname) %(refname)%(else)%(*objectname) %(*refname)%(end)%00%(taggerdate:unix)"" --exclude=refs/notes/commits --exclude=refs/agents/** --exclude=refs/sessions/** --exclude=refs/*/checkpoints/** --exclude=refs/copilot/** --exclude=refs/jj/keep/**")]
+    [TestCase(RefsFilter.Heads, @"--no-optional-locks for-each-ref --format=""%(objectname) %(refname)%00%(taggerdate:unix)"" refs/heads/ --exclude=refs/notes/commits --exclude=refs/agents/** --exclude=refs/sessions/** --exclude=refs/*/checkpoints/** --exclude=refs/copilot/** --exclude=refs/jj/keep/**")]
+    public void GetRefs_should_append_taggerdate_to_format_when_withTaggerDate_is_true(RefsFilter getRefs, string expected)
+    {
+        Commands.GetRefs(getRefs, noLocks: true, GitRefsSortBy.Default, GitRefsSortOrder.Ascending, count: 0, withTaggerDate: true).ToString().Should().Be(expected);
+    }
+
     // Don't care about permutations because the args aren't correlated
     [TestCase(false, false, false, null, false, null, null, "merge --no-ff --no-edit branch")]
     [TestCase(true, true, true, null, true, null, null, "merge --ff --squash --no-commit --allow-unrelated-histories --no-edit branch")]

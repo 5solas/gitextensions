@@ -2,6 +2,7 @@
 using CommonTestUtils;
 using GitCommands;
 using GitCommands.Git;
+using GitCommands.Logging;
 using NSubstitute;
 
 namespace GitCommandsTests.Git;
@@ -154,5 +155,165 @@ public class GitDirectoryResolverTests
 
         _resolver.Resolve(submodulePath).Should().Be($@"{helper.Module.WorkingDirGitDir}modules\Externals\Git.hub\");
         _resolver.Resolve(helper.Module.WorkingDir).Should().Be(helper.Module.WorkingDirGitDir);
+    }
+
+    [Test]
+    public void ResolveCommonDir_should_throw_if_path_is_null()
+    {
+        ((Action)(() => _resolver.ResolveCommonDir(null!))).Should().Throw<ArgumentNullException>();
+    }
+
+    [TestCase("")]
+    [TestCase(" ")]
+    [TestCase("\t")]
+    public void ResolveCommonDir_should_return_empty_string_if_path_is_empty(string gitDir)
+    {
+        _resolver.ResolveCommonDir(gitDir).Should().BeEmpty();
+    }
+
+    [Test]
+    public void ResolveCommonDir_should_return_original_path_if_commondir_absent()
+    {
+        _file.Exists(Arg.Any<string>()).Returns(false);
+
+        _resolver.ResolveCommonDir(_gitWorkingDir).Should().Be(_gitWorkingDir);
+    }
+
+    [Platform(Include = "Win")]
+    [Test]
+    public void ResolveCommonDir_should_return_resolved_path_for_relative_commondir()
+    {
+        string worktreeGitDir = @"c:\dev\repo\.git\worktrees\wt1";
+        string commondirFile = Path.Combine(worktreeGitDir, "commondir");
+
+        _file.Exists(commondirFile).Returns(true);
+        _file.ReadLines(commondirFile).Returns(new[] { "../.." });
+
+        _resolver.ResolveCommonDir(worktreeGitDir).Should().Be(@"c:\dev\repo\.git\");
+    }
+
+    [Platform(Include = "Win")]
+    [Test]
+    public void ResolveCommonDir_should_return_resolved_path_for_absolute_commondir()
+    {
+        string worktreeGitDir = @"c:\dev\repo\.git\worktrees\wt1";
+        string commondirFile = Path.Combine(worktreeGitDir, "commondir");
+
+        _file.Exists(commondirFile).Returns(true);
+        _file.ReadLines(commondirFile).Returns(new[] { @"c:\dev\main\.git" });
+
+        _resolver.ResolveCommonDir(worktreeGitDir).Should().Be(@"c:\dev\main\.git\");
+    }
+
+    [Platform(Include = "Win")]
+    [Test]
+    public void ResolveCommonDir_should_reconstruct_wsl_unc_path_for_posix_commondir()
+    {
+        string worktreeGitDir = @"\\wsl$\Ubuntu\home\user\repo\.git\worktrees\wt1";
+        string commondirFile = Path.Combine(worktreeGitDir, "commondir");
+
+        _file.Exists(commondirFile).Returns(true);
+        _file.ReadLines(commondirFile).Returns(new[] { "/home/user/repo/.git" });
+
+        _resolver.ResolveCommonDir(worktreeGitDir)
+            .Should().Be(@"\\wsl$\Ubuntu\home\user\repo\.git\");
+    }
+
+    [Platform(Include = "Win")]
+    [Test]
+    public void ResolveCommonDir_should_map_wsl_mnt_path_to_windows_drive()
+    {
+        string worktreeGitDir = @"\\wsl$\Ubuntu\mnt\c\dev\repo\.git\worktrees\wt1";
+        string commondirFile = Path.Combine(worktreeGitDir, "commondir");
+
+        _file.Exists(commondirFile).Returns(true);
+        _file.ReadLines(commondirFile).Returns(new[] { "/mnt/c/dev/repo/.git" });
+
+        _resolver.ResolveCommonDir(worktreeGitDir)
+            .Should().Be(@"C:\dev\repo\.git\");
+    }
+
+    [Test]
+    public void ResolveCommonDir_normal_repository_real_filesystem()
+    {
+        using GitModuleTestHelper helper = new();
+        CommandLog.Clear();
+        string commonDir = helper.Module.GitCommonDirectory;
+        CommandLog.Commands.Should().BeEmpty();
+
+        string gitOutput = helper.Module.GitExecutable.GetOutput("rev-parse --git-common-dir").Trim();
+        string expected = Path.GetFullPath(Path.Combine(helper.Module.WorkingDir, gitOutput));
+        commonDir.TrimEnd('/', '\\').Should().Be(expected.TrimEnd('/', '\\'));
+    }
+
+    [Test]
+    public void ResolveCommonDir_linked_worktree_real_filesystem()
+    {
+        using GitModuleTestHelper helper = new();
+        helper.CreateFile(helper.Module.WorkingDir, "file.txt", "content");
+        helper.Module.GitExecutable.Execute("add file.txt");
+        helper.Module.GitExecutable.Execute("commit -m \"Initial commit\"");
+
+        string worktreePath = Path.Combine(helper.TemporaryPath, "wt1");
+        helper.Module.GitExecutable.Execute($"worktree add \"{worktreePath}\"");
+
+        GitModule worktreeModule = new(new GitExecutorProvider(new GitDirectoryResolver()), worktreePath);
+        CommandLog.Clear();
+        string worktreeCommonDir = worktreeModule.GitCommonDirectory;
+        CommandLog.Commands.Should().BeEmpty();
+
+        string gitOutput = worktreeModule.GitExecutable.GetOutput("rev-parse --git-common-dir").Trim();
+        string expected = Path.GetFullPath(Path.Combine(worktreePath, gitOutput));
+        worktreeCommonDir.TrimEnd('/', '\\').Should().Be(expected.TrimEnd('/', '\\'));
+    }
+
+    [Test]
+    public void ResolveCommonDir_bare_repository_and_worktree_real_filesystem()
+    {
+        using GitModuleTestHelper helper = new();
+        helper.CreateFile(helper.Module.WorkingDir, "file.txt", "content");
+        helper.Module.GitExecutable.Execute("add file.txt");
+        helper.Module.GitExecutable.Execute("commit -m \"Initial commit\"");
+
+        string barePath = Path.Combine(helper.TemporaryPath, "bare.git");
+        Directory.CreateDirectory(barePath);
+        GitModule bareModule = new(new GitExecutorProvider(new GitDirectoryResolver()), barePath);
+        bareModule.Init(bare: true, shared: false);
+        helper.Module.GitExecutable.Execute($"push \"{barePath.ToPosixPath()}\" HEAD:main");
+
+        CommandLog.Clear();
+        string bareCommonDir = bareModule.GitCommonDirectory;
+        CommandLog.Commands.Should().BeEmpty();
+        string bareGitOutput = bareModule.GitExecutable.GetOutput("rev-parse --git-common-dir").Trim();
+        string expectedBare = Path.GetFullPath(Path.Combine(barePath, bareGitOutput));
+        bareCommonDir.TrimEnd('/', '\\').Should().Be(expectedBare.TrimEnd('/', '\\'));
+
+        string bareWorktreePath = Path.Combine(helper.TemporaryPath, "bare-wt");
+        bareModule.GitExecutable.Execute($"worktree add \"{bareWorktreePath}\" main");
+
+        GitModule bareWorktreeModule = new(new GitExecutorProvider(new GitDirectoryResolver()), bareWorktreePath);
+        CommandLog.Clear();
+        string bareWorktreeCommonDir = bareWorktreeModule.GitCommonDirectory;
+        CommandLog.Commands.Should().BeEmpty();
+        string bareWorktreeGitOutput = bareWorktreeModule.GitExecutable.GetOutput("rev-parse --git-common-dir").Trim();
+        string expectedBareWorktree = Path.GetFullPath(Path.Combine(bareWorktreePath, bareWorktreeGitOutput));
+        bareWorktreeCommonDir.TrimEnd('/', '\\').Should().Be(expectedBareWorktree.TrimEnd('/', '\\'));
+    }
+
+    [Test]
+    public void ResolveCommonDir_submodule_real_filesystem()
+    {
+        using GitModuleTestHelper helper = new();
+        string submodulePath = Path.Combine(helper.Module.WorkingDir, "External", "Sub");
+        string gitdirFolder = Path.Combine(helper.Module.WorkingDir, ".git", "modules", "External", "Sub");
+        Directory.CreateDirectory(gitdirFolder);
+        helper.CreateFile(submodulePath, ".git", "gitdir: ../../.git/modules/External/Sub\r\n");
+
+        GitModule subModule = new(new GitExecutorProvider(new GitDirectoryResolver()), submodulePath);
+        CommandLog.Clear();
+        string subCommonDir = subModule.GitCommonDirectory;
+        CommandLog.Commands.Should().BeEmpty();
+
+        subCommonDir.TrimEnd('/', '\\').Should().Be(gitdirFolder.TrimEnd('/', '\\'));
     }
 }

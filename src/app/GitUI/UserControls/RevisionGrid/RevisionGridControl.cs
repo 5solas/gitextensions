@@ -1065,7 +1065,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
         Lazy<IReadOnlyCollection<GitRevision>> getStashRevs = new(() =>
             !AppSettings.ShowStashes || Module.IsBareRepository()
             ? []
-            : new RevisionReader(capturedModule).GetStashes(cancellationToken));
+            : GetStashesIfRefExists(capturedModule, getUnfilteredRefs, cancellationToken));
 
         try
         {
@@ -1090,6 +1090,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
             _gridView.Focus();
             _gridView.SelectionChanged += OnGridViewSelectionChanged;
             dataLoadId = _gridView.MarkAsDataLoading();
+            BeginReachabilityLoad(dataLoadId, capturedModule, _filterInfo, getUnfilteredRefs);
 
             // Add the spinner controls, removed by SetPage()
             Controls.Add(_loadingControlSpinner);
@@ -1177,6 +1178,11 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
                 {
                     try
                     {
+                        if (getStashRevs.Value.Count == 0)
+                        {
+                            return;
+                        }
+
                         stashesById = getStashRevs.Value.ToDictionary(r => r.ObjectId);
 
                         // Git stores stashes in 2 or 3 commits. The (first) "stash" commit is listed by git-stash-list,
@@ -1384,6 +1390,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
         void OnRevisionReadCore(IReadOnlyList<GitRevision> revisions)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            AddToReachabilityIndex(dataLoadId, revisions);
 
             if (!firstRevisionReceived)
             {
@@ -1517,6 +1524,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
 
             _refreshRevisionsSequence.CancelCurrent();
 
+            EndReachabilityLoad(dataLoadId);
             _gridView.MarkAsDataLoadingComplete(dataLoadId);
             this.InvokeAndForget(() => SetPage(new ErrorControl()));
             _isRefreshingRevisions = false;
@@ -1542,6 +1550,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
 
                     bool showArtificial = AddArtificialRevisions();
                     cancellationToken.ThrowIfCancellationRequested();
+                    EndReachabilityLoad(dataLoadId);
                     _gridView.LoadingCompleted(dataLoadId);
 
                     await this.SwitchToMainThreadAsync(cancellationToken);
@@ -1613,6 +1622,7 @@ public sealed partial class RevisionGridControl : GitModuleControl, ICheckRefs, 
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+                CompleteReachabilityLoad(dataLoadId);
                 _gridView.LoadingCompleted(dataLoadId);
 
                 await this.SwitchToMainThreadAsync(cancellationToken);

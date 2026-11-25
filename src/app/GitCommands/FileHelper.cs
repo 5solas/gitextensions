@@ -4,7 +4,7 @@ using GitExtUtils;
 
 namespace GitCommands;
 
-public static class FileHelper
+public static partial class FileHelper
 {
     private static readonly IEnumerable<string> BinaryExtensions = new[]
     {
@@ -67,6 +67,11 @@ public static class FileHelper
     /// <returns>null if no info in .gitattributes (or ambiguous). True if marked as binary, false if marked as text</returns>
     private static bool? IsBinaryAccordingToGitAttributes(IGitModule module, string fileName)
     {
+        if (TryGetCachedGitAttribute(module, fileName, out bool? cached))
+        {
+            return cached;
+        }
+
         string[] diffValues = ["set", "astextplain", "ada", "bibtext", "cpp", "csharp", "css", "dts", "elixir", "fortran", "html", "java", "kotlin", "markdown", "matlab", "objc", "pascal", "perl", "php", "python", "ruby", "rust", "scheme", "tex"];
         GitArgumentBuilder cmd = new("check-attr")
         {
@@ -78,6 +83,7 @@ public static class FileHelper
             "--",
             fileName.Quote()
         };
+        module = Git.Broker.GitBroker.WithAttributes(module, fileName);
         ExecutionResult result = module.GitExecutable.Execute(cmd, throwOnErrorExit: false);
         if (!result.ExitedSuccessfully)
         {
