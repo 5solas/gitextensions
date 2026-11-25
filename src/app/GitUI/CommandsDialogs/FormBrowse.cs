@@ -285,6 +285,7 @@ public sealed partial class FormBrowse : GitModuleForm, IBrowseRepo
         MainSplitContainer.SplitterDistance = DpiUtil.Scale(260);
 
         InitCountArtificial(out _gitStatusMonitor);
+        FsMonitor.IdleFsMonitorDaemons.Default.Attach(this, this);
 
         _formBrowseMenus = new FormBrowseMenus(mainMenuStrip);
 
