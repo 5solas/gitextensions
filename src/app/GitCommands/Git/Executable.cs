@@ -137,6 +137,7 @@ public sealed class Executable : IExecutable
                     WorkingDirectory = workDir
                 }
             };
+            GitBinaryResolver.TryRedirect(_process.StartInfo);
 
             _logOperation = CommandLog.LogProcessStart($"{fileName} {prefixArguments}".Trim(), arguments, workDir);
 

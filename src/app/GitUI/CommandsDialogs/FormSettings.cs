@@ -139,6 +139,7 @@ public sealed partial class FormSettings : GitModuleForm, ISettingsPageHost
         settingsTreeView.AddSettingsPage(SettingsPageBase.Create<AdvancedSettingsPage>(this, serviceProvider), gitExtPageRef, Images.AdvancedSettings);
         SettingsPageReference advancedPageRef = AdvancedSettingsPage.GetPageReference();
         settingsTreeView.AddSettingsPage(SettingsPageBase.Create<ConfirmationsSettingsPage>(this, serviceProvider), advancedPageRef, Images.BisectGood);
+        settingsTreeView.AddSettingsPage(SettingsPageBase.Create<PerformanceSettingsPage>(this, serviceProvider), advancedPageRef, Images.Settings);
 
         // >> Detailed
         settingsTreeView.AddSettingsPage(SettingsPageBase.Create<DetailedSettingsPage>(this, serviceProvider), gitExtPageRef, Images.Settings);

@@ -263,6 +263,14 @@ public class RevisionGraph : IRevisionGraphRowProvider
     /// <returns><see langword="true"/> if the row cache is invalidated; otherwise <see langword="false"/>.</returns>
     public bool Add(GitRevision revision)
     {
+        if (_revisionByObjectId.ContainsKey(revision.ObjectId))
+        {
+            // The revision is already in the graph, e.g. a stash which was inserted next to its parent
+            // and is listed by git-log afterwards. Adding it again would only increase Count,
+            // which then never matches the number of nodes and keeps the caches from completing.
+            return false;
+        }
+
         int minExistingScore;
 
         // The commits will be sorted by the score (not continuous numbering, there may be gaps).
@@ -977,9 +985,11 @@ public class RevisionGraph : IRevisionGraphRowProvider
     /// <returns>The ordered revision cache.</returns>
     private ImmutableArray<RevisionGraphRevision> BuildOrderedNodesCache(int currentRowIndex)
     {
-        if (!_orderedNodesCacheInvalid && _orderedNodesCache.Length > Math.Min(Count - 1, currentRowIndex))
+        // Use a local variable: another thread can reset the field while it is rebuilding the cache.
+        ImmutableArray<RevisionGraphRevision> localOrderedNodesCache = _orderedNodesCache;
+        if (!_orderedNodesCacheInvalid && localOrderedNodesCache.Length > Math.Min(Count - 1, currentRowIndex))
         {
-            return _orderedNodesCache;
+            return localOrderedNodesCache;
         }
 
         // The Score of the referenced nodes can be rewritten by another thread.
@@ -993,9 +1003,10 @@ public class RevisionGraph : IRevisionGraphRowProvider
                 _orderedNodesCacheInvalid = false;
                 _orderedNodesCache = [];
 
-                _orderedNodesCache = [.. _revisionByObjectId.Values.OrderBy(n => n.Score)];
+                ImmutableArray<RevisionGraphRevision> orderedNodes = [.. _revisionByObjectId.Values.OrderBy(n => n.Score)];
+                _orderedNodesCache = orderedNodes;
 
-                return _orderedNodesCache;
+                return orderedNodes;
             }
             catch (ArgumentException ex) when (_orderedNodesCacheInvalid && ex.Message.Contains("IComparer.Compare()"))
             {

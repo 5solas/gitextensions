@@ -535,21 +535,32 @@ public sealed partial class GitStatusMonitor : IDisposable
             _isFirstPostRepoChanged = false;
         }
 
+        IndexRefresh indexRefresh = new(this, module, noLocks, cancelToken);
+
         ThreadHelper.FileAndForget(async () =>
                 {
                     try
                     {
+                        (long Length, DateTime LastWriteTimeUtc)? indexKeyBefore = (module as GitModule)?.GetIndexKey();
+                        (noLocks, cancelToken) = indexRefresh.Begin();
                         ArgumentString cmd = Commands.GetAllChangedFiles(excludeIgnoredFiles: true, UntrackedFilesMode.Default, noLocks: noLocks);
                         ExecutionResult result = await module.GitExecutable.ExecuteAsync(cmd, cancellationToken: cancelToken);
+                        cancelToken = indexRefresh.End(result.ExitedSuccessfully);
 
                         if (result.ExitedSuccessfully && !ModuleHasChanged())
                         {
                             // Update callers also if cancelled, this is for the correct module
                             string output = result.StandardOutput;
-                            IReadOnlyList<GitItemStatus> changedFiles = _getAllChangedFilesOutputParser.Parse(output);
+                            ChangedFilesParseResult parseResult = _getAllChangedFilesOutputParser.ParseResult(output);
+
+                            (long Length, DateTime LastWriteTimeUtc)? indexKeyAfter = (module as GitModule)?.GetIndexKey();
+                            if (indexKeyBefore is not null && indexKeyBefore == indexKeyAfter && indexKeyAfter.HasValue)
+                            {
+                                (module as GitModule)?.InjectConflictCache(indexKeyAfter.Value, parseResult.HasUnmergedEntries);
+                            }
 
                             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancelToken);
-                            GitWorkingDirectoryStatusChanged?.Invoke(this, new GitWorkingDirectoryStatusEventArgs(changedFiles));
+                            GitWorkingDirectoryStatusChanged?.Invoke(this, new GitWorkingDirectoryStatusEventArgs(parseResult.Items, parseResult.HasUnmergedEntries));
                         }
 
                         _consecutiveErrorCount = 0;
@@ -560,6 +571,11 @@ public sealed partial class GitStatusMonitor : IDisposable
                     }
                     catch (Exception exception)
                     {
+                        if (indexRefresh.TryFallBack())
+                        {
+                            return;
+                        }
+
                         if (exception.Message?.Contains(BugReportInvoker.DubiousOwnershipSecurityConfigString) is true)
                         {
                             BugReportInvoker.Report(exception, isTerminating: false);
@@ -590,6 +606,8 @@ public sealed partial class GitStatusMonitor : IDisposable
                     }
                     finally
                     {
+                        cancelToken = indexRefresh.CancellationToken;
+
                         lock (_statusSequenceLock)
                         {
                             if (!cancelToken.IsCancellationRequested)
