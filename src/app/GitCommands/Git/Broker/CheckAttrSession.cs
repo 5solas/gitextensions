@@ -14,8 +14,13 @@ internal sealed class CheckAttrSession : BrokerSession
 
     private readonly AttributeFiles _files;
 
-    internal CheckAttrSession(IProcess process, AttributeFiles files)
-        : base(process, firstResponseTimeout: null)
+    // The caller cannot cancel the request. Usually, the first response takes about 0.1 s. If it takes longer than this,
+    // e.g. because of a virus scanner, a process per request is not faster, but it does not need to be waited for both.
+    // After some failures, the persistent process is not used for some time.
+    internal static readonly TimeSpan FirstResponseTimeout = TimeSpan.FromSeconds(5);
+
+    internal CheckAttrSession(IProcess process, AttributeFiles files, TimeSpan? firstResponseTimeout = null)
+        : base(process, firstResponseTimeout ?? FirstResponseTimeout)
     {
         _files = files;
     }

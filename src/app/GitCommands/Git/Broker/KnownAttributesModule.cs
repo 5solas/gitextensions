@@ -28,7 +28,7 @@ internal class KnownAttributesModule : DispatchProxy
     protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         => targetMethod!.Name == $"get_{nameof(IGitModule.GitExecutable)}"
             ? _executable
-            : targetMethod.Invoke(_module, args);
+            : targetMethod.Invoke(_module, BindingFlags.DoNotWrapExceptions, binder: null, args, culture: null);
 
     private sealed class KnownOutputExecutable(IExecutable executable, byte[] output) : IExecutable
     {
