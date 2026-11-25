@@ -226,3 +226,24 @@ pwsh eng/hj/Sync-Upstream.ps1 -Topics <path>
 | `GitCommands/Git/IndexRefreshGate.cs` | `GitModule.IsRunningGitProcess` / `IsGitFsMonitorDaemon` 의 프로세스 판정 |
 
 변경 내용과 알려진 한계는 [CHANGELOG.md](CHANGELOG.md) 를 본다.
+
+---
+
+## W30 (hj-9) 추가 접점: 상주 check-attr, fsmonitor, Performance 설정 페이지
+
+| upstream 파일 | 추가 줄 | 훅 |
+| :--- | ---: | :--- |
+| `src/app/GitCommands/FileHelper.cs` | 1 | `module = GitBroker.WithAttributes(module, fileName)` — 상주 프로세스가 답했으면 그 출력을 돌려주는 모듈로 교체(파서는 upstream 그대로) |
+| `src/app/GitUI/CommandsDialogs/FormBrowse.cs` | 1 | `FsMonitor.IdleFsMonitorDaemons.Default.Attach(this, this)` |
+| `src/app/GitUI/CommandsDialogs/FormSettings.cs` | 1 | Performance 설정 페이지 등록 |
+| `src/app/GitUI/Translation/English.xlf` | 120 | fsmonitor 진단 문구, Performance 페이지 문구(새 번역 단위) |
+
+`GitConfigAdvancedSettingsPage` 의 fsmonitor 표시는 partial 파일(`GitConfigAdvancedSettingsPage.FsMonitor.cs`)의 `OnPageShown` 재정의로 넣어 upstream 파일 변경이 없다. upstream 이 그 페이지에 `OnPageShown` 을 추가하면 컴파일 오류로 드러난다.
+
+### 동기화 때 직접 대조해야 하는 것
+
+| 포크 파일 | 의존하는 upstream 동작 |
+| :--- | :--- |
+| `GitCommands/Git/Broker/CheckAttrSession.cs`, `KnownAttributesModule.cs` | `FileHelper.IsBinaryAccordingToGitAttributes` 가 실행하는 `check-attr -z diff text crlf eol -- <file>` 의 인자와 속성 목록(바뀌면 세션 명령줄도 맞춘다) |
+| `GitCommands/Git/IndexRefreshGate.cs` | 상주 프로세스 명령줄(`cat-file --batch*`, `check-attr --stdin`) 판정 |
+| `GitCommands/Git/FsMonitorDaemon.cs` | git 의 fsmonitor 데몬 파이프 이름 규칙(git 내부 구현) |

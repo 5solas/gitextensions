@@ -7,6 +7,82 @@ git 프로세스 수는 예산 테스트(`FormBrowseGitProcessBudgetTests`)의 �
 
 ---
 
+## 7.3.0-hj-9 (2026-11-26)
+
+upstream 기준은 hj-8 과 같다(`bd69886b7`). hj-8 에서 "다음 릴리스 예정"으로 남긴 항목이 들어갔다.
+
+### 수치 요약
+
+| 항목 | hj-8 | hj-9 |
+| :--- | ---: | ---: |
+| 같은 저장소에서 다음 파일을 볼 때 git 프로세스 | 1 | 0 |
+| 파일 표시 시간 중앙값 (gitextensions 저장소, 64개 파일) | 58 ms | 18 ms |
+| 저장소 열기 git 프로세스 (스태시 없음 / 있음) | 8 / 9 | 8 / 9 |
+| 다른 저장소에서 되돌아오는 전환의 git 프로세스 | 4 | 4 |
+
+측정은 개발 PC(로컬 NTFS, git 2.56.1) 기준이다.
+
+### 변경 내용
+
+**1. `git check-attr` 도 상주 프로세스로** (커밋 `9836a9433`, `73d0a26f7`)
+- 파일을 볼 때 남아 있던 `git check-attr` 1회를 저장소당 하나의 상주 `git check-attr --stdin -z` 프로세스 요청으로 바꿨다.
+- git 은 `.gitattributes` 를 프로세스가 사는 동안 다시 읽지 않는다(실험으로 확인). 그래서 요청마다 git 이 읽을 파일들(요청 경로의 모든 상위 폴더의 `.gitattributes`, `info/attributes`, index, 전역·시스템 attributes)의 크기와 수정·생성 시각을 비교하고, 다르면 프로세스를 다시 띄운다. 최근 2초 안에 바뀐 파일이 있으면 예전처럼 단발 실행한다.
+- 이진/텍스트 판정 규칙은 복제하지 않았다(upstream 파서를 그대로 탄다).
+- 3초 넘게 쉬었다가 다음 파일을 보면 프로세스 1개가 다시 시작된다.
+
+**2. fsmonitor 진단과 유휴 데몬 종료** (커밋 `a9dcfa99e`, `5e34a0672`)
+- Git 설정 고급 페이지의 `core.fsmonitor` 옆에 권장 / 비권장 / 지원 안 됨을 표시한다(로컬 고정 드라이브, index 1 MB 이상, 서브모듈 10개 미만이면 권장). git 을 실행하지 않는다.
+- 이번 실행에서 연 저장소 중 최근에 쓴 5개만 fsmonitor 데몬을 유지하고, 나머지는 백그라운드에서 `git fsmonitor--daemon stop` 으로 끝낸다. 창에 열려 있는 저장소와 `core.fsmonitor` 가 켜진 것으로 확인되지 않은 저장소는 건드리지 않는다. 데몬이 떠 있는지는 이름 있는 파이프로 판단한다.
+- 데몬 1개는 메모리 약 8.7 MB, 스레드 14개, 핸들 112개를 쓴다(실험).
+
+**3. 설정 화면** (커밋 `5e34a0672`)
+- 설정 > Git Extensions > Advanced > **Performance** 페이지가 생겼다. hj-7 ~ hj-9 의 설정 8개를 여기서 바꾼다. 각 항목 아래에 설명이 있다.
+
+| 화면 항목 | 설정 키 | 기본값 |
+| :--- | :--- | :--- |
+| Start the git binary directly instead of its launcher | `UseDirectGitBinary` | 켬 |
+| Read file contents with a persistent git process | `UseGitBroker` | 켬 |
+| Read git attributes with a persistent git process, too | `UseGitBrokerForAttributes` | 켬 |
+| Limit for the config and the stashes of recent repositories | `RepoSnapshotMemoryLimit` | 1024 MB |
+| Limit for file contents read by the persistent git process | `GitBrokerMemoryLimit` | 512 MB |
+| Allow the status update to refresh the index if it was slow | `RefreshIndexAfterSlowStatus` | 켬 |
+| Stop the daemons of repositories which have not been used recently | `StopIdleFsMonitorDaemons` | 켬 |
+| Number of daemons to keep | `MaxFsMonitorDaemons` | 5 |
+
+**4. hj-8 리뷰에서 남았던 지적 수정**
+- R7: 충돌 확인 플래그를 잠금 안에서 기록, 컨트롤이 사라지면 대기 취소, 취소된 워크트리 로드가 늦게 상태를 바꾸지 않음.
+- R8: 파일 지문이 없는 설정 기록으로는 상주 프로세스 사용 여부를 기억하지 않음, 두 상주 프로세스 모두 `-c core.fsmonitor=false` 로 실행하고 `:` 로 시작하는 이름은 보내지 않음, 첫 요청이 취소돼도 시작 중인 프로세스를 3초까지 기다림.
+- hj-8 릴리스 때 원인 미확인이던 단위 테스트 간헐 실패(`Config_should_be_read_again_if_global_config_changed`)는 **테스트 격리 문제**로 확인됐다. 테스트 도우미 저장소의 지연된 설정 재읽기가 전역 명령 기록에 섞인 것이며(지연을 넣어 재현), 제품 결함이 아니다. 테스트가 자기 저장소의 명령만 세도록 고쳤다.
+
+### 알려진 한계
+
+- **상주 `check-attr` 프로세스는 저장소 작업 폴더를 현재 폴더로 잡는다.** 마지막으로 파일을 본 뒤 약 3초 동안 그 저장소(또는 워크트리)의 루트 폴더를 옮기거나 지우면 실패할 수 있다. 3초 뒤 프로세스가 끝난다.
+- 크기와 수정·생성 시각을 모두 그대로 둔 채 내용만 바꾼 attributes 파일은 감지하지 못한다.
+- `HOME` 이 완전한 Windows 경로가 아니면(예: `/c/Users/...`) 상주 `check-attr` 를 쓰지 않는다.
+- 저장소 스냅샷을 끄면(`RepoSnapshotMemoryLimit` = 0) 상주 프로세스도 쓰지 않는다(설정이 최신인지 확인할 수단이 없어지기 때문).
+- 스테이징 등으로 index 가 바뀌면 최대 2초 동안 `check-attr` 가 단발 실행으로 돌아간다.
+- **fsmonitor "권장" 기준(index 1 MB 이상)은 검증되지 않았다.** 실험에서 파일 2만 개(index 1.6 MB) 저장소는 fsmonitor 를 켜도 `git status` 가 빨라지지 않았다(83~103 ms 대 90~106 ms). 큰 저장소에서 실제 효과를 본 뒤 기준을 조정해야 한다.
+- 데몬을 끈 뒤 다른 도구(IDE, 터미널)가 그 저장소에서 처음 실행하는 `git status` 가 한 번 약 40 ms 느려진다(파일 2만 개 기준, 저장소가 클수록 커진다).
+- junction, subst, 8.3 경로로 연 저장소의 데몬은 감지하지 못해 끄지 않는다. 파이프 이름 규칙은 git 내부 구현이라 바뀌면 아무것도 끄지 않게 된다.
+- 앱을 끝낼 때는 데몬을 정리하지 않는다.
+- 설정 페이지의 문구는 영문만 있다. 다른 DPI 와 어두운 테마에서의 화면은 확인하지 않았다(자동 테스트는 96 dpi 배치만).
+- hj-8 의 알려진 한계(index 갱신 중 다른 창의 git 명령 실패 가능, 표식 없는 충돌의 배너 지연 등)는 그대로다.
+
+### 코드 리뷰에서 나온 결함과 처리
+
+| 리뷰 | 대상 | 결과 | 처리 |
+| :--- | :--- | :--- | :--- |
+| R9 | 상주 `check-attr` | 차단 결함 없음. 중간 1, 낮음 5 | 3건 수정(`73d0a26f7`): 전역 attributes 파일을 git 과 다른 곳에서 찾아 낡은 속성이 남을 수 있던 문제 등. 오류 출력 상한은 upstream 의 프로세스 시작 코드를 복제해야 해서 넣지 않음. 2건 기각 |
+| R10 | fsmonitor | 차단 결함 없음. 중요 1, 경미 4 | 2건 수정(`5e34a0672`): 프로그램을 시작할 때 연 저장소가 데몬 추적에 등록되지 않던 문제, 진단의 UI 스레드 파일 확인. 설정 화면 없음은 Performance 페이지로 해결. 2건 기각 |
+| R11 | 설정 페이지, 마지막 수정 | 차단 결함 없음. 경미 3 (스킬 대신 수동 리뷰) | 수정하지 않음: `XDG_CONFIG_HOME` 이 있어도 `HOME` 형식이 맞지 않으면 상주 `check-attr` 를 포기함, 필요 없는 `APPDATA` 경로 감시, 환경 변수 설정의 반복 호출. 모두 느려지는 쪽이고 결과는 옳다 |
+
+### 다음 후보
+
+- 보류: 3번 2단계(ref 가 같으면 전환 시 `git log` 생략). gitextensions 크기 저장소에서 전환 373 ms → 170~270 ms 로 추정되나, upstream 과 공유하는 파일에 훅이 필요하다.
+- 보류: 6-A(`for-each-ref` 2회 병합), 9번(gitoxide 읽기 전용 가속 실험).
+
+---
+
 ## 7.3.0-hj-8 (2026-11-25)
 
 upstream 기준은 hj-7 과 같다(`bd69886b7`). 성능 개선 로드맵(W30)의 3번 1단계, 4번 1단계, 5번, 6-B, 6-C 가 들어갔다.
