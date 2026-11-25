@@ -45,6 +45,9 @@ internal sealed class IdleFsMonitorDaemons
     {
         commandsSource.UICommandsChanged += (_, _) => OnOpened(window, commandsSource.UICommands.Module);
         window.Disposed += (_, _) => OnClosed(window);
+
+        // The event for the repository which is already open has been missed
+        OnOpened(window, commandsSource.UICommands.Module);
     }
 
     internal void OnOpened(object window, IGitModule module)

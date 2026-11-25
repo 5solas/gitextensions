@@ -212,8 +212,12 @@ public sealed class IdleFsMonitorDaemonsTests
         IGitUICommandsSource source = Substitute.For<IGitUICommandsSource>();
         source.UICommands.Returns(commands);
         using Control window = new();
+
+        // The commands of a form are set by its constructor, i.e. the event for the first repository has already been raised
+        IGitModule firstModule = CreateModule("a");
+        commands.Module.Returns(firstModule);
         _daemons.Attach(source, window);
-        foreach (string name in new[] { "a", "b", "c" })
+        foreach (string name in new[] { "b", "c" })
         {
             IGitModule module = CreateModule(name);
             commands.Module.Returns(module);

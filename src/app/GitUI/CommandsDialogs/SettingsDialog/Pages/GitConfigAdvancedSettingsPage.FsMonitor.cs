@@ -27,7 +27,7 @@ public partial class GitConfigAdvancedSettingsPage
     {
         base.OnPageShown();
 
-        if (Module is not IGitModule module || !module.IsValidGitWorkingDir())
+        if (Module is not IGitModule module)
         {
             return;
         }
@@ -35,6 +35,11 @@ public partial class GitConfigAdvancedSettingsPage
         this.InvokeAndForget(async () =>
         {
             await TaskScheduler.Default;
+            if (!module.IsValidGitWorkingDir())
+            {
+                return;
+            }
+
             (FsMonitorAdvice Advice, long IndexBytes)? result = FsMonitorAdvisor.Evaluate(module.WorkingDir, module.WorkingDirGitDir, isBare: module.IsBareRepository());
             await this.SwitchToMainThreadAsync();
             ShowFsMonitorAdvice(result);
