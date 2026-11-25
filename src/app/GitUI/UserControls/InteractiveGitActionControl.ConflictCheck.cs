@@ -51,7 +51,10 @@ public partial class InteractiveGitActionControl
         if (Module is GitModule gitModule && gitModule.TryGetCachedConflictedMerge() == hasConflicts)
         {
             // Do not preserve the previous state until a check waiting for this result has noticed it
-            _conflictCheckInProgress = false;
+            lock (_conflictCheckLock)
+            {
+                _conflictCheckInProgress = false;
+            }
         }
 
         RefreshGitAction(checkForConflicts: true);
@@ -125,7 +128,11 @@ public partial class InteractiveGitActionControl
                         }
                     }
 
-                    _conflictCheckInProgress = false;
+                    lock (_conflictCheckLock)
+                    {
+                        _conflictCheckInProgress = false;
+                    }
+
                     RefreshGitAction(checkForConflicts: true);
                 }
                 finally

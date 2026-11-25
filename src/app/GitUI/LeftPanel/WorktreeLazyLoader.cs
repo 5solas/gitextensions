@@ -1,4 +1,5 @@
-﻿using GitExtensions.Extensibility.Git;
+﻿using System.Runtime.CompilerServices;
+using GitExtensions.Extensibility.Git;
 
 namespace GitUI.LeftPanel;
 
@@ -7,9 +8,16 @@ namespace GitUI.LeftPanel;
 /// </summary>
 internal sealed class WorktreeLazyLoader(WorktreeTree tree)
 {
+    // A superseded load can end late, so do not remember the result of a load but which nodes have not been read by git
+    private readonly ConditionalWeakTable<Node, object?> _lazyNodes = [];
     private TreeView? _treeView;
     private volatile bool _isCollapsed;
-    private volatile bool _isLazy;
+
+    /// <summary>
+    ///  Gets whether the displayed worktree has not been read by git, unless this has already been requested.
+    ///  Must be called on the UI thread.
+    /// </summary>
+    internal bool IsLazy => _isCollapsed && tree.Nodes.Any(node => _lazyNodes.TryGetValue(node, out _));
 
     /// <summary>
     ///  Must be called on the UI thread when a reload is started.
@@ -18,7 +26,6 @@ internal sealed class WorktreeLazyLoader(WorktreeTree tree)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
-        _isLazy = false;
         _isCollapsed = !tree.TreeViewNode.IsExpanded;
     }
 
@@ -35,8 +42,9 @@ internal sealed class WorktreeLazyLoader(WorktreeTree tree)
         }
 
         Nodes nodes = new(tree);
-        nodes.AddNode(new WorktreeNode(tree, worktree, isCurrent: true, Path.GetRelativePath(parentDir, worktree.Path)));
-        _isLazy = true;
+        WorktreeNode node = new(tree, worktree, isCurrent: true, Path.GetRelativePath(parentDir, worktree.Path));
+        _lazyNodes.Add(node, null);
+        nodes.AddNode(node);
         return nodes;
     }
 
@@ -64,7 +72,7 @@ internal sealed class WorktreeLazyLoader(WorktreeTree tree)
     /// </summary>
     public void LoadIfExpanded()
     {
-        if (_isLazy && tree.TreeViewNode.IsExpanded)
+        if (IsLazy && tree.TreeViewNode.IsExpanded)
         {
             tree.Refresh();
         }

@@ -8139,6 +8139,42 @@ Context menu for additional operations</source>
         <source>Advanced</source>
         <target />
       </trans-unit>
+      <trans-unit id="_fsMonitorBare.Text">
+        <source>bare repository.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorLarge.Text">
+        <source>large repository on a local drive (index {0:N1} MB).</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorNetworkDrive.Text">
+        <source>network drive or WSL.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorNotFixedDrive.Text">
+        <source>not a fixed drive.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorNotRecommended.Text">
+        <source>Not recommended: {0}</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorNotSupported.Text">
+        <source>Not supported: {0}</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorRecommended.Text">
+        <source>Recommended: {0}</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorSmall.Text">
+        <source>small repository (index {0:N1} MB), the daemon would need about 9 MB of memory for little effect.</source>
+        <target />
+      </trans-unit>
+      <trans-unit id="_fsMonitorSubmodules.Text">
+        <source>many submodules, the daemon also has to handle their changes.</source>
+        <target />
+      </trans-unit>
       <trans-unit id="lblCoreFsMonitor.Text">
         <source>Run a file system monitor daemon per working directory</source>
         <target />

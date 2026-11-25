@@ -18,6 +18,13 @@ public partial class InteractiveGitActionControl
     internal void SetStatusUpdateSource(Func<IGitModule, int, StatusUpdateState> getStatusUpdateState)
     {
         _getStatusUpdateState = getStatusUpdateState;
+        Disposed += (_, _) =>
+        {
+            lock (_conflictCheckLock)
+            {
+                _conflictCheckCts?.Cancel();
+            }
+        };
     }
 
     /// <summary>
